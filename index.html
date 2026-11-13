@@ -259,6 +259,54 @@ function makePairs() {
   for (var i = 0; i < 6; i += 2) out.push([s[i], s[i + 1]]);
   return out;
 }
+// ---------- partecipanti dell'evento e sorteggio senza ripetizioni ----------
+function eventPlayers(ev) {
+  var all = state.names.filter(Boolean);
+  var p = (ev.players || all);
+  var r = all.filter(function (n) { return p.indexOf(n) >= 0; });
+  return r.length ? r : all;
+}
+function allMatchings(arr) {
+  if (!arr.length) return [[]];
+  var a = arr[0], out = [];
+  for (var i = 1; i < arr.length; i++) {
+    var rest = arr.filter(function (_, k) { return k !== 0 && k !== i; });
+    allMatchings(rest).forEach(function (m) { out.push([[a, arr[i]]].concat(m)); });
+  }
+  return out;
+}
+function pk(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
+function totalPairs(ev) { var n = eventPlayers(ev).length; return n * (n - 1) / 2; }
+// Coppie già uscite nel "giro" corrente: quando sono uscite tutte le combinazioni si riparte da zero.
+function usedPairs(ev, skipDay) {
+  var pl = eventPlayers(ev), used = {}, n = 0, tot = totalPairs(ev);
+  Object.keys(ev.days).sort().forEach(function (d) {
+    if (d === skipDay) return;
+    ev.days[d].forEach(function (p) {
+      if (pl.indexOf(p[0]) < 0 || pl.indexOf(p[1]) < 0) return;
+      var k = pk(p[0], p[1]); if (!used[k]) { used[k] = 1; n++; }
+    });
+    if (n >= tot) { used = {}; n = 0; }
+  });
+  return used;
+}
+function makePairsFor(ev, skipDay) {
+  var used = usedPairs(ev, skipDay), ms = allMatchings(eventPlayers(ev)), tot = totalPairs(ev);
+  function overlap(m, u) { return m.filter(function (p) { return u[pk(p[0], p[1])]; }).length; }
+  function add(u, m) { var c = {}; for (var k in u) c[k] = 1; m.forEach(function (p) { c[pk(p[0], p[1])] = 1; }); return c; }
+  // il giro deve poter essere completato senza ripetizioni: evita le "strade senza uscita"
+  function complete(u) {
+    if (Object.keys(u).length >= tot) return true;
+    return ms.some(function (m) { return overlap(m, u) === 0 && complete(add(u, m)); });
+  }
+  var ok = ms.filter(function (m) { return overlap(m, used) === 0 && complete(add(used, m)); });
+  if (!ok.length) {   // situazione anomala (es. coppie modificate a mano): meno ripetizioni possibili
+    var best = Math.min.apply(null, ms.map(function (m) { return overlap(m, used); }));
+    ok = ms.filter(function (m) { return overlap(m, used) === best; });
+  }
+  var pick = ok[Math.floor(Math.random() * ok.length)];
+  return shuffle(pick.map(function (p) { return Math.random() < 0.5 ? [p[0], p[1]] : [p[1], p[0]]; }));
+}
 function namesOk() {
   if (state.names.some(function (n) { return !n; })) return "Compila tutti e 6 i nomi dei partecipanti.";
   var l = state.names.map(function (n) { return n.toLowerCase(); });
@@ -375,13 +423,17 @@ function renderNew(app) {
     if (!s.value || !e.value) { err.textContent = "Inserisci data di inizio e di fine."; return; }
     if (e.value < s.value) { err.textContent = "La data di fine non può precedere quella di inizio."; return; }
     if (range(s.value, e.value).length > 366) { err.textContent = "L\u2019evento può durare al massimo 366 giorni."; return; }
-    var ev = { id: Date.now().toString(36), name: name, start: s.value, end: e.value, days: {}, fish: ids.slice() };
+    if (pls.length < 2 || pls.length % 2) { err.textContent = "Scegli un numero pari di partecipanti (almeno 2)."; return; }
+    var ev = { id: Date.now().toString(36), name: name, start: s.value, end: e.value, days: {}, fish: ids.slice(), players: pls.slice() };
     events.push(ev); saveEvents(); go("event", ev.id);
   };
   var ids = [];
+  var pls = state.names.filter(Boolean);
+  var l0 = el("label", "f", "Partecipanti dell\u2019evento");
+  var pp = playerPicker(pls, function () {});
   var l4 = el("label", "f", "Pesci pescabili (opzionale)");
   var pk = fishPicker(ids, function () {}, false);
-  [l1, n, l2, s, l3, e, l4, pk, b, err].forEach(function (x) { app.appendChild(x); });
+  [l1, n, l2, s, l3, e, l0, pp, l4, pk, b, err].forEach(function (x) { app.appendChild(x); });
 }
 
 // ---------- EVENTO ----------
@@ -393,6 +445,8 @@ function renderEvent(app) {
   app.appendChild(el("h1", "", ev.name));
   var all = range(ev.start, ev.end), done = Object.keys(ev.days).length;
   app.appendChild(el("p", "sub", shortDate(ev.start) + " \u2192 " + shortDate(ev.end) + " \u00b7 " + done + "/" + all.length + " giorni con coppie"));
+  var nUsed = Object.keys(usedPairs(ev, null)).length;
+  app.appendChild(el("p", "note", "Combinazioni di coppia già uscite in questo giro: " + nUsed + "/" + totalPairs(ev) + ". Non si ripetono finché non sono uscite tutte."));
   var st0 = standings(ev);
   var rc = el("div", "card tap");
   rc.appendChild(el("div", "t", "Classifica"));
@@ -406,6 +460,14 @@ function renderEvent(app) {
   rc.onclick = function () { go("rank", ev.id); };
   rc.style.marginBottom = "14px";
   app.appendChild(rc);
+  if (!ev.players) ev.players = eventPlayers(ev);
+  var dp = el("details"); dp.style.marginTop = "0"; dp.style.marginBottom = "18px";
+  var sp = el("summary", "", ""); dp.appendChild(sp);
+  function updSp() { var n = eventPlayers(ev).length; sp.textContent = "Partecipanti dell\u2019evento (" + n + ")" + ((n < 2 || n % 2) ? " \u2013 serve un numero pari" : ""); }
+  updSp();
+  dp.appendChild(el("p", "note", "Scegli chi partecipa a questo evento (serve un numero pari). Le coppie già generate non cambiano: i prossimi sorteggi useranno i partecipanti scelti."));
+  dp.appendChild(playerPicker(ev.players, function () { saveEvents(); updSp(); }));
+  app.appendChild(dp);
   if (!ev.fish) ev.fish = [];
   ev.fish = ev.fish.filter(function (id) { return fish.some(function (f) { return f.id === id; }); });
   var dt = el("details"); dt.style.marginTop = "0"; dt.style.marginBottom = "18px";
@@ -426,9 +488,12 @@ function renderEvent(app) {
     var b = el("button", "btn small", has ? "Rigenera" : "Genera coppie"); b.style.marginTop = "10px";
     if (!has) { b.className = "btn small main"; b.style.width = "auto"; }
     b.onclick = function () {
-      var m = namesOk(); if (m) { err.textContent = m; window.scrollTo(0, document.body.scrollHeight); return; }
+      var m = namesOk();
+      var npl = eventPlayers(ev).length;
+      if (!m && (npl < 2 || npl % 2)) m = "Scegli un numero pari di partecipanti (almeno 2) per questo evento.";
+      if (m) { err.textContent = m; window.scrollTo(0, document.body.scrollHeight); return; }
       if (has && !confirm(regenMsg(ev, d))) return;
-      ev.days[d] = makePairs();
+      ev.days[d] = makePairsFor(ev, d);
       if (ev.cookies && ev.cookies[d]) ev.cookies[d] = ev.cookies[d].filter(function (c) { return c.scope !== "pair"; });
       saveEvents();
       var y = window.scrollY; render(); window.scrollTo(0, y);
@@ -731,7 +796,7 @@ function standings(ev) {
     if (!map[n]) { map[n] = { name: n, single: 0, pair: 0, total: 0, n: 0 }; order.push(map[n]); }
     return map[n];
   }
-  state.names.forEach(function (n) { if (n) row(n); });
+  eventPlayers(ev).forEach(function (n) { row(n); });
   Object.keys(ev.days).forEach(function (d) {
     if (d > t) return;
     days++;
@@ -1032,6 +1097,35 @@ function dayPairs(ev, d, pairs) {
       pb.appendChild(pf);
     }
     box.appendChild(pb);
+  });
+  return box;
+}
+
+// ---------- selezione partecipanti per evento ----------
+function playerPicker(ids, onChange) {
+  var box = el("div"), cbs = [];
+  var bar = el("div", "bar");
+  var all = el("button", "btn small", "Seleziona tutti"), none = el("button", "btn small", "Nessuno");
+  all.type = "button"; none.type = "button";
+  function setAll(v) {
+    ids.length = 0; if (v) state.names.forEach(function (n) { if (n) ids.push(n); });
+    cbs.forEach(function (c) { c.checked = v; }); onChange();
+  }
+  all.onclick = function () { setAll(true); }; none.onclick = function () { setAll(false); };
+  bar.appendChild(all); bar.appendChild(none); box.appendChild(bar);
+  state.names.forEach(function (name, i) {
+    if (!name) return;
+    var row = el("label", "pick");
+    var cb = el("input"); cb.type = "checkbox"; cb.checked = ids.indexOf(name) >= 0; cbs.push(cb);
+    cb.onchange = function () {
+      var k = ids.indexOf(name);
+      if (cb.checked && k < 0) ids.push(name);
+      if (!cb.checked && k >= 0) ids.splice(k, 1);
+      onChange();
+    };
+    var av = el("div", "av"); av.style.width = "40px"; av.style.height = "40px"; fillAv(av, i);
+    row.appendChild(cb); row.appendChild(av); row.appendChild(el("span", "nm", name));
+    box.appendChild(row);
   });
   return box;
 }
