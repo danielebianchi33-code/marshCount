@@ -30,3 +30,16 @@ apertura successiva con connessione.
 I dati (partecipanti, eventi, catture, foto) restano nella memoria di ogni telefono: non
 vengono inviati da nessuna parte e non sono condivisi tra telefoni diversi. Usa
 **Backup completo** nella home per salvarli o spostarli.
+
+## Sincronizzazione condivisa (Google Fogli)
+
+1. Crea un Google Foglio vuoto (ad esempio `MarshCount`).
+2. Estensioni > Apps Script: incolla il contenuto di `marshcount-script.gs` (file a parte, non va su GitHub)
+   e cambia la password nella prima riga.
+3. Distribuisci > Nuova distribuzione > App web. Esegui come: io. Chi ha accesso: chiunque. Autorizza i permessi.
+4. Copia l'indirizzo che finisce con `/exec`.
+5. In MarshCount, in fondo alla home, apri **Sincronizzazione (Google Fogli)**, incolla indirizzo e password
+   e tocca **Salva e collega**. Si fa una volta per telefono: il primo telefono carica i dati, gli altri li scaricano.
+
+La sincronizzazione funziona solo dall'app pubblicata (GitHub Pages) o installata, non dall'anteprima di Claude.
+Se modifichi lo script, crea una **nuova distribuzione** o aggiorna la versione di quella esistente.

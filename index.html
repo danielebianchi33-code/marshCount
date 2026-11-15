@@ -150,6 +150,7 @@ input:focus,textarea:focus{outline:3px solid var(--accent);outline-offset:1px}
 .opt .fthumb{width:54px;height:36px}
 .fishph.wide{width:200px;height:134px}
 .fishph.wide img{object-fit:contain}
+input[type=password]{width:100%;padding:14px;font-size:1rem;border:1px solid var(--border);border-radius:12px;background:var(--card);color:var(--text);min-width:0}
 @keyframes pop{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:none}}
 @keyframes pulse{50%{transform:scale(1.12)}}
 @keyframes wob{0%,100%{transform:rotate(-12deg)}50%{transform:rotate(12deg) scale(1.15)}}
@@ -199,9 +200,9 @@ events = lsGet(K_EV) || [];
 var K_FISH = "coppie.pesci.v1";
 var fish = lsGet(K_FISH) || [];
 var draft = null;
-function saveFish() { return lsSet(K_FISH, fish); }
-function saveEvents() { return lsSet(K_EV, events); }
-function savePart() { lsSet(K_PART, state); }
+function saveFish() { var r = lsSet(K_FISH, fish); scheduleSync(); return r; }
+function saveEvents() { var r = lsSet(K_EV, events); scheduleSync(); return r; }
+function savePart() { lsSet(K_PART, state); scheduleSync(); }
 
 // ---------- date ----------
 function pad(n) { return ("0" + n).slice(-2); }
@@ -277,35 +278,75 @@ function allMatchings(arr) {
 }
 function pk(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
 function totalPairs(ev) { var n = eventPlayers(ev).length; return n * (n - 1) / 2; }
+// Turni di un giorno: ogni turno è un elenco di gruppi (coppie o singoli). ev.days[d] = ultimo turno.
+function turnsOf(ev, d) { return (ev.turns && ev.turns[d]) || (ev.days[d] ? [ev.days[d]] : []); }
 // Coppie già uscite nel "giro" corrente: quando sono uscite tutte le combinazioni si riparte da zero.
-function usedPairs(ev, skipDay) {
+function usedPairs(ev, skipDay, skipTurn) {
   var pl = eventPlayers(ev), used = {}, n = 0, tot = totalPairs(ev);
   Object.keys(ev.days).sort().forEach(function (d) {
-    if (d === skipDay) return;
-    ev.days[d].forEach(function (p) {
-      if (pl.indexOf(p[0]) < 0 || pl.indexOf(p[1]) < 0) return;
-      var k = pk(p[0], p[1]); if (!used[k]) { used[k] = 1; n++; }
+    turnsOf(ev, d).forEach(function (groups, t) {
+      if (d === skipDay && t === skipTurn) return;
+      var ps = groups.filter(function (p) { return p.length === 2 && pl.indexOf(p[0]) >= 0 && pl.indexOf(p[1]) >= 0; });
+      if (ps.some(function (p) { return used[pk(p[0], p[1])]; })) { used = {}; n = 0; }   // giro chiuso in anticipo
+      ps.forEach(function (p) { var k = pk(p[0], p[1]); if (!used[k]) { used[k] = 1; n++; } });
+      if (n >= tot) { used = {}; n = 0; }
     });
-    if (n >= tot) { used = {}; n = 0; }
   });
   return used;
 }
-function makePairsFor(ev, skipDay) {
-  var used = usedPairs(ev, skipDay), ms = allMatchings(eventPlayers(ev)), tot = totalPairs(ev);
+// Con numero dispari (5) uno pesca da solo: l'ordine è casuale ma fisso per l'evento e cambia a blocchi (giorni ÷ n).
+function soloFor(ev, d, k) {
+  var pl = eventPlayers(ev), n = pl.length;
+  if (!ev.soloOrder || ev.soloOrder.length !== n || ev.soloOrder.some(function (x) { return pl.indexOf(x) < 0; })) {
+    ev.soloOrder = shuffle(pl.slice()); saveEvents();
+  }
+  var prev = lastPairsBefore(ev, d, k).filter(function (g) { return g.length === 1; })[0];
+  var i = prev ? ev.soloOrder.indexOf(prev[0]) : -1;
+  return ev.soloOrder[(i + 1) % n];   // sempre il successivo: nessuno si ripete finché non lo sono stati tutti
+}
+// coppie del turno precedente (per non riproporle subito quando si apre un nuovo giro)
+function lastPairsBefore(ev, d, k) {
+  var last = [];
+  Object.keys(ev.days).sort().forEach(function (dd) {
+    turnsOf(ev, dd).forEach(function (g, t) { if (dd < d || (dd === d && t < k)) last = g; });
+  });
+  return last;
+}
+function makeGroupsFor(ev, d, k) {
+  var pl = eventPlayers(ev), n = pl.length;
+  if (n <= 3) return pl.map(function (p) { return [p]; });          // 3 pescatori: tutti da soli
+  var solo = null, base = pl.slice();
+  if (n % 2) { solo = soloFor(ev, d, k); base = pl.filter(function (p) { return p !== solo; }); }
+  var used = usedPairs(ev, d, k), ms = allMatchings(base), tot = totalPairs(ev);
   function overlap(m, u) { return m.filter(function (p) { return u[pk(p[0], p[1])]; }).length; }
-  function add(u, m) { var c = {}; for (var k in u) c[k] = 1; m.forEach(function (p) { c[pk(p[0], p[1])] = 1; }); return c; }
-  // il giro deve poter essere completato senza ripetizioni: evita le "strade senza uscita"
+  function add(u, m) { var c = {}; for (var x in u) c[x] = 1; m.forEach(function (p) { c[pk(p[0], p[1])] = 1; }); return c; }
+  // numero pari: il giro deve poter essere completato senza ripetizioni (niente "strade senza uscita")
   function complete(u) {
     if (Object.keys(u).length >= tot) return true;
     return ms.some(function (m) { return overlap(m, u) === 0 && complete(add(u, m)); });
   }
-  var ok = ms.filter(function (m) { return overlap(m, used) === 0 && complete(add(used, m)); });
-  if (!ok.length) {   // situazione anomala (es. coppie modificate a mano): meno ripetizioni possibili
-    var best = Math.min.apply(null, ms.map(function (m) { return overlap(m, used); }));
-    ok = ms.filter(function (m) { return overlap(m, used) === best; });
+  // numero dispari: guarda avanti assumendo che i turni successivi ruotino chi è da solo
+  function completeOdd(u, j) {
+    if (Object.keys(u).length >= tot) return true;
+    if (j > n) return false;
+    var sj = ev.soloOrder[(ev.soloOrder.indexOf(solo) + j) % n], mj = allMatchings(pl.filter(function (p) { return p !== sj; }));
+    return mj.some(function (m) { return overlap(m, u) === 0 && completeOdd(add(u, m), j + 1); });
   }
+  var ok = ms.filter(function (m) { return overlap(m, used) === 0 && (n % 2 ? completeOdd(add(used, m), 1) : complete(add(used, m))); });
+  if (!ok.length && n % 2) ok = ms.filter(function (m) { return overlap(m, used) === 0; });
+  if (!ok.length) {   // nessun abbinamento nuovo possibile con chi è da solo: si apre un nuovo giro
+    var lp = lastPairsBefore(ev, d, k).filter(function (p) { return p.length === 2; });
+    var fresh = ms.filter(function (m) { return m.every(function (p) { return !lp.some(function (q) { return pk(q[0], q[1]) === pk(p[0], p[1]); }); }); });
+    ok = fresh.length ? fresh : ms;
+  }
+  // se possibile, mai la stessa coppia del turno precedente (anche quando si ricomincia un giro)
+  var lp2 = lastPairsBefore(ev, d, k).filter(function (p) { return p.length === 2; });
+  var fresh2 = ok.filter(function (m) { return m.every(function (p) { return !lp2.some(function (q) { return pk(q[0], q[1]) === pk(p[0], p[1]); }); }); });
+  if (fresh2.length) ok = fresh2;
   var pick = ok[Math.floor(Math.random() * ok.length)];
-  return shuffle(pick.map(function (p) { return Math.random() < 0.5 ? [p[0], p[1]] : [p[1], p[0]]; }));
+  var g = shuffle(pick.map(function (p) { return Math.random() < 0.5 ? [p[0], p[1]] : [p[1], p[0]]; }));
+  if (solo) g.push([solo]);
+  return g;
 }
 function namesOk() {
   if (state.names.some(function (n) { return !n; })) return "Compila tutti e 6 i nomi dei partecipanti.";
@@ -315,7 +356,7 @@ function namesOk() {
 }
 
 // ---------- navigazione ----------
-function go(screen, id) { view = { screen: screen, id: id || null }; msgText = ""; render(); window.scrollTo(0, 0); }
+function go(screen, id) { view = { screen: screen, id: id || null }; msgText = ""; SYNC.keepOpen = false; render(); window.scrollTo(0, 0); }
 function render() {
   var app = $("app"); app.innerHTML = "";
   if (view.screen === "new") renderNew(app);
@@ -401,6 +442,7 @@ function renderHome(app) {
   app.appendChild(backupBox("Backup completo (tutti i dati)",
     "Include partecipanti e foto, eventi, coppie, catalogo pesci e pesci scelti per ogni evento. Importare sostituisce i dati attuali.",
     exportAll, "coppie-backup.json", importAll));
+  app.appendChild(syncBox());
 }
 
 // ---------- NUOVO EVENTO ----------
@@ -423,17 +465,18 @@ function renderNew(app) {
     if (!s.value || !e.value) { err.textContent = "Inserisci data di inizio e di fine."; return; }
     if (e.value < s.value) { err.textContent = "La data di fine non può precedere quella di inizio."; return; }
     if (range(s.value, e.value).length > 366) { err.textContent = "L\u2019evento può durare al massimo 366 giorni."; return; }
-    if (pls.length < 2 || pls.length % 2) { err.textContent = "Scegli un numero pari di partecipanti (almeno 2)."; return; }
+    if (pls.length < 2) { err.textContent = "Scegli almeno 2 partecipanti."; return; }
     var ev = { id: Date.now().toString(36), name: name, start: s.value, end: e.value, days: {}, fish: ids.slice(), players: pls.slice() };
     events.push(ev); saveEvents(); go("event", ev.id);
   };
   var ids = [];
   var pls = state.names.filter(Boolean);
   var l0 = el("label", "f", "Partecipanti dell\u2019evento");
+  var nt0 = el("p", "note", "Con 2 o 3 partecipanti ognuno pesca da solo, senza sorteggio né punteggio di coppia; con 4 o 6 si formano coppie; con 5 ci sono due coppie e uno da solo a rotazione.");
   var pp = playerPicker(pls, function () {});
   var l4 = el("label", "f", "Pesci pescabili (opzionale)");
   var pk = fishPicker(ids, function () {}, false);
-  [l1, n, l2, s, l3, e, l0, pp, l4, pk, b, err].forEach(function (x) { app.appendChild(x); });
+  [l1, n, l2, s, l3, e, l0, nt0, pp, l4, pk, b, err].forEach(function (x) { app.appendChild(x); });
 }
 
 // ---------- EVENTO ----------
@@ -443,10 +486,27 @@ function renderEvent(app) {
   var back = el("button", "link", "\u2190 Eventi"); back.onclick = function () { go("home"); };
   app.appendChild(back);
   app.appendChild(el("h1", "", ev.name));
-  var all = range(ev.start, ev.end), done = Object.keys(ev.days).length;
-  app.appendChild(el("p", "sub", shortDate(ev.start) + " \u2192 " + shortDate(ev.end) + " \u00b7 " + done + "/" + all.length + " giorni con coppie"));
-  var nUsed = Object.keys(usedPairs(ev, null)).length;
-  app.appendChild(el("p", "note", "Combinazioni di coppia già uscite in questo giro: " + nUsed + "/" + totalPairs(ev) + ". Non si ripetono finché non sono uscite tutte."));
+  var all = range(ev.start, ev.end);
+  var solosOnly = eventPlayers(ev).length <= 3;
+  if (solosOnly) {   // nessun sorteggio: ogni giorno i gruppi sono i pescatori scelti
+    var chg = false;
+    all.forEach(function (dd) {
+      if (!ev.days[dd]) {
+        var g0 = eventPlayers(ev).map(function (p) { return [p]; });
+        ev.days[dd] = g0; if (!ev.turns) ev.turns = {}; ev.turns[dd] = [g0]; chg = true;
+      }
+    });
+    if (chg) saveEvents();
+  }
+  var done = Object.keys(ev.days).length;
+  app.appendChild(el("p", "sub", shortDate(ev.start) + " \u2192 " + shortDate(ev.end) + " \u00b7 " + done + "/" + all.length + (solosOnly ? " giorni" : " giorni con coppie")));
+  var npl0 = eventPlayers(ev).length;
+  if (npl0 <= 3) app.appendChild(el("p", "note", "Con " + npl0 + " partecipanti ognuno pesca da solo: non ci sono coppie da sorteggiare e conta solo il punteggio singolo."));
+  else {
+    var nUsed = Object.keys(usedPairs(ev, null)).length;
+    app.appendChild(el("p", "note", "Combinazioni di coppia già uscite in questo giro: " + nUsed + "/" + totalPairs(ev) + ". Non si ripetono finché non sono uscite tutte."));
+    if (npl0 === 5) app.appendChild(el("p", "note", "Con 5 partecipanti ci sono 2 coppie e uno da solo. Chi pesca da solo cambia a ogni turno e può ripetersi solo dopo che lo sono stati tutti e 5." + (all.length < 5 ? " Poiché l\u2019evento dura meno di 5 giorni, il pulsante \u201cCambia coppie\u201d di ogni giornata passa al turno successivo e mantiene i punti già inseriti." : "")));
+  }
   var st0 = standings(ev);
   var rc = el("div", "card tap");
   rc.appendChild(el("div", "t", "Classifica"));
@@ -463,9 +523,9 @@ function renderEvent(app) {
   if (!ev.players) ev.players = eventPlayers(ev);
   var dp = el("details"); dp.style.marginTop = "0"; dp.style.marginBottom = "18px";
   var sp = el("summary", "", ""); dp.appendChild(sp);
-  function updSp() { var n = eventPlayers(ev).length; sp.textContent = "Partecipanti dell\u2019evento (" + n + ")" + ((n < 2 || n % 2) ? " \u2013 serve un numero pari" : ""); }
+  function updSp() { var n = eventPlayers(ev).length; sp.textContent = "Partecipanti dell\u2019evento (" + n + ")" + (n < 2 ? " \u2013 ne servono almeno 2" : ""); }
   updSp();
-  dp.appendChild(el("p", "note", "Scegli chi partecipa a questo evento (serve un numero pari). Le coppie già generate non cambiano: i prossimi sorteggi useranno i partecipanti scelti."));
+  dp.appendChild(el("p", "note", "Scegli chi partecipa (almeno 2). Con 2 o 3 partecipanti ognuno pesca da solo, senza sorteggio né punteggio di coppia; con 4 o 6 si formano coppie; con 5 ci sono due coppie e uno da solo a rotazione. Le coppie già generate non cambiano."));
   dp.appendChild(playerPicker(ev.players, function () { saveEvents(); updSp(); }));
   app.appendChild(dp);
   if (!ev.fish) ev.fish = [];
@@ -490,15 +550,29 @@ function renderEvent(app) {
     b.onclick = function () {
       var m = namesOk();
       var npl = eventPlayers(ev).length;
-      if (!m && (npl < 2 || npl % 2)) m = "Scegli un numero pari di partecipanti (almeno 2) per questo evento.";
+      if (!m && npl < 2) m = "Scegli almeno 2 partecipanti per questo evento.";
       if (m) { err.textContent = m; window.scrollTo(0, document.body.scrollHeight); return; }
       if (has && !confirm(regenMsg(ev, d))) return;
-      ev.days[d] = makePairsFor(ev, d);
-      if (ev.cookies && ev.cookies[d]) ev.cookies[d] = ev.cookies[d].filter(function (c) { return c.scope !== "pair"; });
+      var trn = turnsOf(ev, d).slice(), kk = has ? trn.length - 1 : 0, gg = makeGroupsFor(ev, d, kk);
+      trn[kk] = gg; if (!ev.turns) ev.turns = {};
+      ev.turns[d] = trn; ev.days[d] = gg;
+      if (ev.cookies && ev.cookies[d]) ev.cookies[d] = ev.cookies[d].filter(function (c) { return c.scope !== "pair" || (c.t || 0) !== kk; });
       saveEvents();
       var y = window.scrollY; render(); window.scrollTo(0, y);
     };
-    c.appendChild(b); app.appendChild(c);
+    if (!solosOnly) c.appendChild(b);
+    if (has && eventPlayers(ev).length === 5 && all.length < 5) {
+      var nx = el("button", "btn small", "Cambia coppie"); nx.style.marginTop = "10px"; nx.style.marginLeft = "8px";
+      nx.onclick = function () {
+        if (!confirm("Passare al turno successivo? Il punteggio inserito finora resta assegnato alle coppie attuali.")) return;
+        var trn = turnsOf(ev, d).slice(), gg = makeGroupsFor(ev, d, trn.length);
+        trn.push(gg); if (!ev.turns) ev.turns = {};
+        ev.turns[d] = trn; ev.days[d] = gg; saveEvents();
+        var y = window.scrollY; render(); window.scrollTo(0, y);
+      };
+      c.appendChild(nx);
+    }
+    app.appendChild(c);
   });
   app.appendChild(err);
   var del = el("button", "btn danger", "Elimina evento"); del.style.marginTop = "26px";
@@ -789,9 +863,210 @@ function renderProfile(app) {
   [l1, n, nt, l2, f, l3, t, ok].forEach(function (x) { app.appendChild(x); });
 }
 
+// ---------- SINCRONIZZAZIONE (Google Fogli) ----------
+// Ogni cattura, biscotto, giornata, evento e pesce è un "record" con data di modifica: i telefoni
+// si scambiano solo i record cambiati, quindi gli inserimenti fatti da persone diverse si sommano.
+var SYNC = { busy: false, timer: null, applying: false, started: false, status: "", msg: "", at: 0, statusEl: null, renderPending: false, keepOpen: false };
+var K_SCFG = "coppie.sync.cfg.v1", K_SMETA = "coppie.sync.meta.v1";
+function syncCfg() { var c = lsGet(K_SCFG); return c && c.url && c.pw ? c : null; }
+function syncMeta() { return lsGet(K_SMETA) || { recs: {}, since: 0, joined: false, lastOk: 0 }; }
+function syncHash(s) { var h = 5381; for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return h + ":" + s.length; }
+
+// Tutti i record locali (foto personalizzate escluse: restano sul telefono)
+function syncBuild() {
+  var m = {};
+  m["part"] = JSON.stringify({ names: state.names, bios: state.bios });
+  fish.forEach(function (f) { m["fish:" + f.id] = JSON.stringify({ id: f.id, name: f.name, special: !!f.special, tiers: f.tiers }); });
+  events.forEach(function (ev) {
+    if (!ev.id) return;
+    m["ev:" + ev.id] = JSON.stringify({ id: ev.id, name: ev.name, start: ev.start, end: ev.end, fish: ev.fish || [], players: ev.players || null, soloOrder: ev.soloOrder || null });
+    Object.keys(ev.days || {}).forEach(function (d) { m["day:" + ev.id + ":" + d] = JSON.stringify({ turns: turnsOf(ev, d) }); });
+    Object.keys(ev.catches || {}).forEach(function (d) { (ev.catches[d] || []).forEach(function (c) { if (c.id) m["catch:" + ev.id + ":" + d + ":" + c.id] = JSON.stringify(c); }); });
+    Object.keys(ev.cookies || {}).forEach(function (d) { (ev.cookies[d] || []).forEach(function (c) { if (c.id) m["ck:" + ev.id + ":" + d + ":" + c.id] = JSON.stringify(c); }); });
+  });
+  return m;
+}
+// Confronta con l'ultimo stato noto: marca come modificati i record cambiati e come eliminati quelli spariti
+function syncDetect(meta) {
+  var cur = syncBuild(), now = Date.now();
+  Object.keys(cur).forEach(function (k) {
+    var h = syncHash(cur[k]), r = meta.recs[k];
+    if (!r || r.d || r.h !== h) meta.recs[k] = { u: now, h: h, d: 0, sent: false };
+  });
+  Object.keys(meta.recs).forEach(function (k) {
+    if (!(k in cur) && !meta.recs[k].d) meta.recs[k] = { u: now, h: "", d: 1, sent: false };
+  });
+  return cur;
+}
+// Applica un record arrivato dal foglio ai dati locali
+function syncPut(r) {
+  var p = r.k.split(":"), t = p[0], v = r.d ? null : JSON.parse(r.v);
+  if (t === "part") {
+    if (v && v.names && v.names.length === 6) { state.names = v.names; if (v.bios && v.bios.length === 6) state.bios = v.bios; }
+    return;
+  }
+  if (t === "fish") {
+    var i = fish.findIndex(function (f) { return f.id === p[1]; });
+    if (r.d) { if (i >= 0) fish.splice(i, 1); return; }
+    if (i >= 0) { fish[i].name = v.name; fish[i].special = v.special; fish[i].tiers = v.tiers; }
+    else fish.push({ id: v.id, name: v.name, photo: null, special: v.special, tiers: v.tiers });
+    return;
+  }
+  if (t === "ev") {
+    var j = events.findIndex(function (e) { return e.id === p[1]; });
+    if (r.d) { if (j >= 0) events.splice(j, 1); return; }
+    var ev = j >= 0 ? events[j] : null;
+    if (!ev) { ev = { id: v.id, days: {}, turns: {}, catches: {}, cookies: {} }; events.push(ev); }
+    ev.name = v.name; ev.start = v.start; ev.end = v.end; ev.fish = v.fish || [];
+    if (v.players) ev.players = v.players;
+    if (v.soloOrder) ev.soloOrder = v.soloOrder;
+    return;
+  }
+  var ev2 = events.filter(function (e) { return e.id === p[1]; })[0];
+  if (!ev2) return;
+  var d = p[2];
+  if (t === "day") {
+    if (r.d) { delete ev2.days[d]; if (ev2.turns) delete ev2.turns[d]; }
+    else { if (!ev2.turns) ev2.turns = {}; ev2.turns[d] = v.turns; ev2.days[d] = v.turns[v.turns.length - 1]; }
+    return;
+  }
+  var coll = t === "catch" ? "catches" : "cookies";
+  if (!ev2[coll]) ev2[coll] = {};
+  var arr = ev2[coll][d] || [], idx = arr.findIndex(function (c) { return c.id === p[3]; });
+  if (r.d) { if (idx >= 0) arr.splice(idx, 1); }
+  else if (idx >= 0) arr[idx] = v; else arr.push(v);
+  ev2[coll][d] = arr;
+}
+function syncApply(meta, recs, detect) {
+  if (detect) syncDetect(meta);                       // le modifiche locali non ancora inviate vincono sulle più vecchie
+  var pr = { part: 0, fish: 1, ev: 2, day: 3, catch: 4, ck: 5 };
+  recs = recs.filter(function (r) {
+    var m = meta.recs[r.k];
+    return pr[r.k.split(":")[0]] !== undefined && !(m && m.u >= r.u);
+  });
+  recs.sort(function (a, b) { return pr[a.k.split(":")[0]] - pr[b.k.split(":")[0]]; });
+  SYNC.applying = true;
+  recs.forEach(function (r) { try { syncPut(r); } catch (e) {} });
+  var cur = syncBuild();
+  recs.forEach(function (r) {
+    meta.recs[r.k] = r.d ? { u: r.u, h: "", d: 1, sent: true } : { u: r.u, h: syncHash(cur[r.k] || ""), d: 0, sent: true };
+  });
+  if (recs.length) { lsSet(K_EV, events); lsSet(K_FISH, fish); lsSet(K_PART, state); }
+  SYNC.applying = false;
+  return recs.length;
+}
+
+function syncTime(ts) { var d = new Date(ts); return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2); }
+function syncStatusText() {
+  if (!syncCfg()) return "Non collegato.";
+  if (SYNC.status === "sync") return "Sincronizzazione in corso\u2026";
+  if (SYNC.status === "off") return "Offline: le modifiche saranno inviate appena torna la rete.";
+  if (SYNC.status === "error") return "Errore: " + SYNC.msg;
+  return SYNC.at ? "Sincronizzato alle " + syncTime(SYNC.at) + "." : "Non ancora sincronizzato.";
+}
+function setSyncStatus(st, msg) {
+  SYNC.status = st; SYNC.msg = msg || "";
+  try { if (SYNC.statusEl && document.body.contains(SYNC.statusEl)) SYNC.statusEl.textContent = syncStatusText(); } catch (e) {}
+}
+function syncRefreshUI(applied) {
+  if (applied) SYNC.renderPending = true;
+  if (!SYNC.renderPending) return;
+  var a = document.activeElement, typing = a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
+  var busy = typing || document.querySelector(".panel:not([hidden])") || view.screen === "new" || view.screen === "fish" || (view.screen === "profile" && profEdit);
+  if (busy) return;
+  SYNC.renderPending = false;
+  var y = window.scrollY; render(); window.scrollTo(0, y);
+}
+
+function syncNow() {
+  var cfg = syncCfg();
+  if (!cfg || SYNC.busy) return Promise.resolve();
+  if (typeof navigator !== "undefined" && navigator.onLine === false) { setSyncStatus("off"); return Promise.resolve(); }
+  SYNC.busy = true; setSyncStatus("sync");
+  var meta = syncMeta(), applied = 0, first = !meta.joined;
+  function post(records) {
+    return fetch(cfg.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ pw: cfg.pw, since: meta.since, records: records }) })
+      .then(function (r) { return r.json(); })
+      .then(function (resp) {
+        if (!resp.ok) throw new Error(resp.error === "password" ? "password errata" : (resp.error || "risposta non valida"));
+        return resp;
+      });
+  }
+  function take(resp) { applied += syncApply(meta, resp.records || [], meta.joined); meta.since = resp.now; lsSet(K_SMETA, meta); }
+  function pending() {
+    var cur = syncDetect(meta), out = [];
+    Object.keys(meta.recs).forEach(function (k) {
+      var r = meta.recs[k];
+      if (!r.sent) out.push(r.d ? { k: k, u: r.u, d: 1 } : { k: k, u: r.u, d: 0, v: cur[k] });
+    });
+    return out;
+  }
+  // primo collegamento: prima si scarica (il foglio vince), poi si inviano solo i record che nel foglio mancano
+  var step1 = first ? post([]).then(function (resp) { take(resp); meta.joined = true; }) : Promise.resolve();
+  return step1.then(function () {
+    var list = pending();
+    if (first && !list.length) return null;
+    return post(list).then(function (resp) {
+      list.forEach(function (x) { if (meta.recs[x.k]) meta.recs[x.k].sent = true; });
+      take(resp);
+    });
+  }).then(function () {
+    meta.lastOk = Date.now(); SYNC.at = meta.lastOk; lsSet(K_SMETA, meta); setSyncStatus("ok");
+  }).catch(function (e) {
+    var m = String((e && e.message) || e);
+    setSyncStatus("error", /Failed to fetch|NetworkError|Load failed|fetch/i.test(m) ? "impossibile raggiungere il foglio (controlla indirizzo e rete)" : m);
+    lsSet(K_SMETA, meta);
+  }).then(function () { SYNC.busy = false; syncRefreshUI(applied); });
+}
+function scheduleSync() {
+  if (!SYNC.started || SYNC.applying) return;
+  clearTimeout(SYNC.timer); SYNC.timer = setTimeout(function () { syncNow(); }, 1500);
+}
+function startSync() {
+  SYNC.at = syncMeta().lastOk || 0;
+  if (SYNC.started || !syncCfg()) return;
+  SYNC.started = true;
+  setTimeout(function () { syncNow(); }, 800);
+  setInterval(function () { if (!document.hidden) syncNow(); }, 30000);
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) syncNow(); });
+  window.addEventListener("online", function () { syncNow(); });
+}
+
+// Riquadro nelle impostazioni (home)
+function syncBox() {
+  var cfg = syncCfg() || {};
+  var d = el("details"); d.open = SYNC.keepOpen;
+  d.appendChild(el("summary", "", "Sincronizzazione (Google Fogli)" + (cfg.url ? " \u2601\ufe0f" : "")));
+  d.appendChild(el("p", "note", "Collega l\u2019app al foglio Google per condividere i dati con gli altri telefoni. Indirizzo e password restano solo su questo telefono. Le foto caricate a mano non vengono condivise."));
+  var l1 = el("label", "f", "Indirizzo dello script (finisce con /exec)"); l1.htmlFor = "syurl";
+  var u = el("input"); u.type = "text"; u.id = "syurl"; u.value = cfg.url || ""; u.placeholder = "https://script.google.com/macros/s/\u2026/exec"; u.autocomplete = "off"; u.setAttribute("autocapitalize", "off");
+  var l2 = el("label", "f", "Password"); l2.htmlFor = "sypw";
+  var p = el("input"); p.type = "password"; p.id = "sypw"; p.value = cfg.pw || ""; p.autocomplete = "off";
+  var st = el("div", "ok"); st.setAttribute("role", "status"); SYNC.statusEl = st; st.textContent = syncStatusText();
+  var bar = el("div", "bar");
+  var bs = el("button", "btn small", "Salva e collega"), bn = el("button", "btn small", "Sincronizza ora"), bx = el("button", "btn small danger", "Scollega");
+  bs.onclick = function () {
+    var url = u.value.trim(), pw = p.value;
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url) || !pw) { st.textContent = "Inserisci l\u2019indirizzo completo dello script (https://script.google.com/macros/s/\u2026/exec) e la password."; return; }
+    var old = syncCfg();
+    if (!old || old.url !== url) lsSet(K_SMETA, { recs: {}, since: 0, joined: false, lastOk: 0 });
+    lsSet(K_SCFG, { url: url, pw: pw });
+    SYNC.keepOpen = true; startSync(); syncNow();
+  };
+  bn.onclick = function () { SYNC.keepOpen = true; syncNow(); };
+  bx.onclick = function () {
+    if (!confirm("Scollegare questo telefono dal foglio? I dati sul telefono restano.")) return;
+    try { localStorage.removeItem(K_SCFG); localStorage.removeItem(K_SMETA); } catch (e) {}
+    SYNC.status = ""; SYNC.at = 0; render();
+  };
+  bar.appendChild(bs); bar.appendChild(bn); bar.appendChild(bx);
+  [l1, u, l2, p, bar, st].forEach(function (x) { d.appendChild(x); });
+  return d;
+}
+
 // ---------- CLASSIFICA ----------
 function standings(ev) {
-  var t = today(), map = {}, order = [], days = 0;
+  var t = today(), map = {}, order = [], days = 0, noPair = eventPlayers(ev).length <= 3;
   function row(n) {
     if (!map[n]) { map[n] = { name: n, single: 0, pair: 0, total: 0, n: 0 }; order.push(map[n]); }
     return map[n];
@@ -801,11 +1076,13 @@ function standings(ev) {
     if (d > t) return;
     days++;
     var list = (ev.catches && ev.catches[d]) || [];
-    ev.days[d].forEach(function (pair) {
-      var a = personPts(ev, d, pair[0]), b = personPts(ev, d, pair[1]), tot = pairTotal(ev, d, pair);
-      [[pair[0], a], [pair[1], b]].forEach(function (x) {
-        var r = row(x[0]); r.single = r2(r.single + x[1]); r.pair = r2(r.pair + tot);
-        r.n += list.filter(function (c) { return c.who === x[0]; }).length;
+    turnsOf(ev, d).forEach(function (groups, t) {
+      groups.forEach(function (grp) {
+        var tot = noPair ? 0 : pairTotal(ev, d, grp, t);
+        grp.forEach(function (nm) {
+          var r = row(nm); r.single = r2(r.single + personPts(ev, d, nm, t)); r.pair = r2(r.pair + tot);
+          r.n += list.filter(function (c) { return c.who === nm && (c.t || 0) === t; }).length;
+        });
       });
     });
   });
@@ -817,7 +1094,7 @@ function standings(ev) {
   });
   var lastPos = order.length ? order[order.length - 1].pos : 0;
   order.forEach(function (r) { r.last = lastPos > 1 && r.pos === lastPos; });
-  return { rows: order, days: days };
+  return { rows: order, days: days, noPair: noPair };
 }
 function medal(r) {
   if (r.total <= 0) return "";
@@ -841,13 +1118,13 @@ function renderRank(app) {
     var rn = el("div", "rname", medal(r) + r.name);
     if (r.last) rn.appendChild(el("span", "wob", " \ud83d\udca9"));
     tx.appendChild(rn);
-    tx.appendChild(el("div", "rsub", "Singolo " + nf(r.single) + " \u00b7 Coppia " + nf(r.pair) + " \u00b7 " + r.n + (r.n === 1 ? " cattura" : " catture")));
+    tx.appendChild(el("div", "rsub", "Singolo " + nf(r.single) + (st.noPair ? "" : " \u00b7 Coppia " + nf(r.pair)) + " \u00b7 " + r.n + (r.n === 1 ? " cattura" : " catture")));
     c.appendChild(tx);
     var tot = el("div", "rtot", nf(r.total)); tot.appendChild(el("small", "", " pt"));
     c.appendChild(tot);
     app.appendChild(c);
   });
-  app.appendChild(el("p", "note", "Totale = punti singoli + punti della coppia (che comprendono anche i propri), sommati giorno per giorno fino a oggi compreso. A parità di totale passa avanti chi ha più punti singoli."));
+  app.appendChild(el("p", "note", st.noPair ? "Con 2 o 3 partecipanti non ci sono coppie: conta solo il punteggio singolo, sommato giorno per giorno fino a oggi compreso." : "Totale = punti singoli + punti della coppia (che comprendono anche i propri), sommati giorno per giorno fino a oggi compreso. Per chi pesca da solo il totale di coppia coincide con i propri punti. A parità di totale passa avanti chi ha più punti singoli."));
 }
 
 // ---------- PESCATO ----------
@@ -868,18 +1145,22 @@ function samePair(c, pair) {
   var m = c.members;
   return !!m && m.length === 2 && ((m[0] === pair[0] && m[1] === pair[1]) || (m[0] === pair[1] && m[1] === pair[0]));
 }
-function personPts(ev, d, name) {
-  var t = 0;
-  ((ev.catches && ev.catches[d]) || []).forEach(function (c) { if (c.who === name) t += c.points; });
-  cks(ev, d).forEach(function (c) { if (c.scope === "single" && c.who === name) t += cookiePts(c); });
-  return r2(t);
+function personPts(ev, d, name, t) {
+  var tt = 0, ok = function (c) { return t === undefined || (c.t || 0) === t; };
+  ((ev.catches && ev.catches[d]) || []).forEach(function (c) { if (c.who === name && ok(c)) tt += c.points; });
+  cks(ev, d).forEach(function (c) { if (c.scope === "single" && c.who === name && ok(c)) tt += cookiePts(c); });
+  return r2(tt);
 }
-function pairBonusPts(ev, d, pair) {
-  var t = 0;
-  cks(ev, d).forEach(function (c) { if (c.scope === "pair" && samePair(c, pair)) t += cookiePts(c); });
-  return r2(t);
+function pairBonusPts(ev, d, grp, t) {
+  var tt = 0;
+  cks(ev, d).forEach(function (c) { if (c.scope === "pair" && samePair(c, grp) && (t === undefined || (c.t || 0) === t)) tt += cookiePts(c); });
+  return r2(tt);
 }
-function pairTotal(ev, d, pair) { return r2(personPts(ev, d, pair[0]) + personPts(ev, d, pair[1]) + pairBonusPts(ev, d, pair)); }
+// totale del gruppo (coppia o singolo) in un turno; per chi è da solo coincide con i suoi punti
+function pairTotal(ev, d, grp, t) {
+  var tt = 0; grp.forEach(function (n) { tt += personPts(ev, d, n, t); });
+  return r2(tt + pairBonusPts(ev, d, grp, t));
+}
 function sgn(p) { return (p > 0 ? "+" : p < 0 ? "\u2212" : "") + nf(Math.abs(p)); }
 function regenMsg(ev, d) {
   var m = "Sostituire le coppie già generate per questo giorno?";
@@ -887,6 +1168,7 @@ function regenMsg(ev, d) {
   var hasP = cks(ev, d).some(function (c) { return c.scope === "pair"; });
   if (hasC) m += " Catture, bonus/malus singoli e penitenze restano legati ai singoli pescatori.";
   if (hasP) m += " I bonus/malus di coppia di questo giorno verranno rimossi.";
+  if (turnsOf(ev, d).length > 1) m += " Verrà sostituito solo l\u2019ultimo turno.";
   return m;
 }
 function seg(opts, init, onPick) {
@@ -900,7 +1182,8 @@ function seg(opts, init, onPick) {
 }
 function dayPairs(ev, d, pairs) {
   var box = el("div", "pairs");
-  var list = (ev.catches && ev.catches[d]) || [];
+  var cur = turnsOf(ev, d).length - 1;
+  var list = ((ev.catches && ev.catches[d]) || []).filter(function (c) { return (c.t || 0) === cur; });
   function getEvFish() {
     return fish.filter(function (f) { return (ev.fish || []).indexOf(f.id) >= 0; })
       .sort(function (a, b) { return a.name.localeCompare(b.name, "it"); });
@@ -908,7 +1191,7 @@ function dayPairs(ev, d, pairs) {
   function refresh() { var y = window.scrollY; render(); window.scrollTo(0, y); }
   function addCookie(rec) {
     if (!ev.cookies) ev.cookies = {};
-    rec.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+    rec.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5); rec.t = cur;
     (ev.cookies[d] = ev.cookies[d] || []).push(rec);
     saveEvents(); refresh();
   }
@@ -933,18 +1216,29 @@ function dayPairs(ev, d, pairs) {
     return cr;
   }
 
+  for (var tt = 0; tt < cur; tt++) (function (t) {   // turni precedenti dello stesso giorno (solo lettura)
+    var dt = el("details"); dt.style.marginTop = "8px";
+    dt.appendChild(el("summary", "", "Turno " + (t + 1) + " \u00b7 concluso"));
+    turnsOf(ev, d)[t].forEach(function (g) {
+      var ln = el("div", "cr"); ln.style.paddingLeft = "0";
+      ln.appendChild(el("span", "", g.join(" + ") + (g.length === 1 ? " (da solo)" : "") + " \u2192 " + ptsTxt(pairTotal(ev, d, g, t))));
+      dt.appendChild(ln);
+    });
+    box.appendChild(dt);
+  })(tt);
+  if (cur > 0) box.appendChild(el("div", "note", "Turno " + (cur + 1) + " (in corso)"));
   pairs.forEach(function (pair, k) {
     var pb = el("div", "pbox");
     var head = el("div", "phead");
-    head.appendChild(el("span", "", "Coppia " + (k + 1)));
-    head.appendChild(el("span", "ptot", "Totale coppia: " + ptsTxt(pairTotal(ev, d, pair))));
+    head.appendChild(el("span", "", pair.length === 1 ? "Da solo" : "Coppia " + (k + 1)));
+    head.appendChild(el("span", "ptot", (pair.length === 1 ? "Totale: " : "Totale coppia: ") + ptsTxt(pairTotal(ev, d, pair, cur))));
     pb.appendChild(head);
 
     pair.forEach(function (name) {
       var fr = el("div", "fisher");
       var fh = el("div", "fh");
       fh.appendChild(avatar(name, "s")); fh.appendChild(el("span", "", name));
-      fh.appendChild(el("span", "sc", ptsTxt(personPts(ev, d, name))));
+      fh.appendChild(el("span", "sc", ptsTxt(personPts(ev, d, name, cur))));
       fr.appendChild(fh);
 
       list.forEach(function (c) {
@@ -959,7 +1253,7 @@ function dayPairs(ev, d, pairs) {
         };
         cr.appendChild(x); fr.appendChild(cr);
       });
-      cks(ev, d).forEach(function (c) { if (c.scope === "single" && c.who === name) fr.appendChild(cookieRow(c, "")); });
+      cks(ev, d).forEach(function (c) { if (c.scope === "single" && c.who === name && (c.t || 0) === cur) fr.appendChild(cookieRow(c, "")); });
 
       var panel = el("div", "panel"); panel.hidden = true;
       var mode = "";
@@ -979,7 +1273,7 @@ function dayPairs(ev, d, pairs) {
       }
       function commit(f, i, method, pts, depth) {
         if (!ev.catches) ev.catches = {};
-        var rec = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), who: name, fishId: f.id, fish: f.name, size: tierLabel(f, i), method: method, points: pts };
+        var rec = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), who: name, fishId: f.id, fish: f.name, size: tierLabel(f, i), method: method, points: pts, t: cur };
         if (depth) rec.depth = depth;
         (ev.catches[d] = ev.catches[d] || []).push(rec);
         splash(f.name); saveEvents(); refresh();
@@ -1046,8 +1340,10 @@ function dayPairs(ev, d, pairs) {
         panel.appendChild(seg(["Bonus", "Malus"], 0, function (i) { sign = i === 0 ? 1 : -1; }));
         var pt = el("input"); pt.type = "text"; pt.placeholder = "Punti (es. 2 o 0,5)"; pt.setAttribute("inputmode", "decimal"); pt.setAttribute("aria-label", "Punti");
         panel.appendChild(pt);
-        panel.appendChild(el("div", "note", "A chi si applica?"));
-        panel.appendChild(seg(["Solo " + name, "Tutta la coppia"], 0, function (i) { scope = i === 0 ? "single" : "pair"; }));
+        if (pair.length === 2) {
+          panel.appendChild(el("div", "note", "A chi si applica?"));
+          panel.appendChild(seg(["Solo " + name, "Tutta la coppia"], 0, function (i) { scope = i === 0 ? "single" : "pair"; }));
+        }
         var tx = el("input"); tx.type = "text"; tx.placeholder = "Messaggio del biscotto (facoltativo)"; tx.setAttribute("aria-label", "Messaggio");
         panel.appendChild(tx);
         var err = el("div", "err"); err.setAttribute("role", "alert");
@@ -1089,7 +1385,7 @@ function dayPairs(ev, d, pairs) {
       pb.appendChild(fr);
     });
 
-    var pc = cks(ev, d).filter(function (c) { return c.scope === "pair" && samePair(c, pair); });
+    var pc = cks(ev, d).filter(function (c) { return c.scope === "pair" && samePair(c, pair) && (c.t || 0) === cur; });
     if (pc.length) {
       var pf = el("div", "fisher");
       pf.appendChild(el("div", "fh", "Biscotti di coppia"));
@@ -1221,6 +1517,7 @@ function importAll(text) {
 fillDefaultBios();
 seedFish();
 fixFishFlags();
+startSync();
 render();
 // Offline: registra il service worker e chiede al telefono di non cancellare i dati
 if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
