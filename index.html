@@ -155,7 +155,6 @@ input[type=password]{width:100%;padding:14px;font-size:1rem;border:1px solid var
 .viewer{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px}
 .viewer img{max-width:100%;max-height:78vh;border-radius:12px}
 .viewer .vt{color:#fff;margin-top:12px;text-align:center;font-size:.9rem}
-.pst{font-size:.8rem;margin-left:-2px}
 @keyframes pop{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:none}}
 @keyframes pulse{50%{transform:scale(1.12)}}
 @keyframes wob{0%,100%{transform:rotate(-12deg)}50%{transform:rotate(12deg) scale(1.15)}}
@@ -1096,19 +1095,15 @@ function syncBox() {
     try { localStorage.removeItem(K_SCFG); localStorage.removeItem(K_SMETA); } catch (e) {}
     SYNC.status = ""; SYNC.at = 0; render();
   };
-  var pst = el("div", "note"); PH.statusEl = pst; photoStatusRefresh();
-  var bf = el("button", "btn small", "Invia foto in attesa"), bv = el("button", "btn small", "Verifica script");
-  bf.onclick = function () { SYNC.keepOpen = true; pst.textContent = "Invio in corso\u2026"; photoUploadPending().then(photoStatusRefresh); };
-  bv.onclick = function () { SYNC.keepOpen = true; photoCheckScript(pst); };
-  bar.appendChild(bs); bar.appendChild(bn); bar.appendChild(bf); bar.appendChild(bv); bar.appendChild(bx);
-  [l1, u, l2, p, bar, st, pst].forEach(function (x) { d.appendChild(x); });
+  bar.appendChild(bs); bar.appendChild(bn); bar.appendChild(bx);
+  [l1, u, l2, p, bar, st].forEach(function (x) { d.appendChild(x); });
   return d;
 }
 
 // ---------- FOTO DELLE CATTURE ----------
 // La miniatura viaggia dentro il record della cattura (si vede subito su tutti i telefoni);
 // la foto intera va su Google Drive tramite lo stesso script e si scarica solo quando la apri.
-var PH = { busy: false, cache: {}, mem: {}, err: {}, statusEl: null };
+var PH = { busy: false, cache: {} };
 function idb() {
   return new Promise(function (res, rej) {
     if (typeof indexedDB === "undefined") return rej(new Error("no idb"));
@@ -1127,17 +1122,10 @@ function idbDo(mode, fn) {
     });
   });
 }
-// coda delle foto da caricare: salvata sul telefono (IndexedDB) e tenuta anche in memoria come riserva
-function qPut(item) { PH.mem[item.id] = item; return idbDo("readwrite", function (st) { return st.put(item); }).catch(function () {}); }
-function qGet(id) { return idbDo("readonly", function (st) { return st.get(id); }).catch(function () { return null; }).then(function (it) { return it || PH.mem[id] || null; }); }
-function qDel(id) { delete PH.mem[id]; return idbDo("readwrite", function (st) { return st["delete"](id); }).catch(function () {}); }
-function qAll() {
-  return idbDo("readonly", function (st) { return st.getAll(); }).catch(function () { return []; }).then(function (a) {
-    var m = {}; (a || []).forEach(function (x) { m[x.id] = x; });
-    for (var k in PH.mem) m[k] = PH.mem[k];
-    return Object.keys(m).map(function (k) { return m[k]; });
-  });
-}
+function qPut(item) { return idbDo("readwrite", function (st) { return st.put(item); }); }
+function qGet(id) { return idbDo("readonly", function (st) { return st.get(id); }); }
+function qDel(id) { return idbDo("readwrite", function (st) { return st["delete"](id); }); }
+function qAll() { return idbDo("readonly", function (st) { return st.getAll(); }); }
 
 // Ridimensiona: foto intera max 1280 px, miniatura max 160 px
 function photoProcess(file) {
@@ -1157,13 +1145,9 @@ function photoProcess(file) {
     img.src = url;
   });
 }
-// capture=true: apre direttamente la fotocamera; false: libreria foto / file
-function pickImage(cb, capture) {
-  Array.prototype.forEach.call(document.querySelectorAll(".phin"), function (x) { x.remove(); });
-  var i = document.createElement("input"); i.type = "file"; i.accept = "image/*"; i.className = "phin"; i.style.display = "none";
-  if (capture) i.setAttribute("capture", "environment");
-  i.onchange = function () { var f = i.files && i.files[0]; i.remove(); if (f) cb(f); };
-  document.body.appendChild(i);
+function pickImage(cb) {
+  var i = document.createElement("input"); i.type = "file"; i.accept = "image/*";
+  i.onchange = function () { if (i.files && i.files[0]) cb(i.files[0]); };
   i.click();
 }
 function findCatch(cid) {
@@ -1176,24 +1160,18 @@ function findCatch(cid) {
 // accoda la foto intera per il caricamento su Drive (si manda appena c'è rete)
 function photoQueue(c, ph, ev, d) {
   var name = [d, ev.name, c.who, c.fish, Date.now().toString(36)].join("_").replace(/[^\w.\-]+/g, "_") + ".jpg";
-  delete PH.err[c.id];
-  return qPut({ id: c.id, data: ph.full, name: name }).then(function () { return photoUploadPending(); });
+  return qPut({ id: c.id, data: ph.full, name: name }).catch(function () {}).then(function () { return photoUploadPending(); });
 }
 function setCatchPhoto(c, ph, ev, d) {
   c.photo = { th: ph.th, id: "" };
   saveEvents();
   return photoQueue(c, ph, ev, d);
 }
-var SCRIPT_OLD = "lo script non è aggiornato: sostituisci il codice, poi Distribuisci > Gestisci distribuzioni > Nuova versione";
 function photoPost(cfg, body) {
   body.pw = cfg.pw;
   return fetch(cfg.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body) })
     .then(function (r) { return r.json(); })
     .then(function (resp) { if (!resp.ok) throw new Error(resp.error === "password" ? "password errata" : (resp.error || "errore")); return resp; });
-}
-function photoErrText(e) {
-  var m = String((e && e.message) || e);
-  return /Failed to fetch|NetworkError|Load failed|fetch/i.test(m) ? "nessuna connessione con lo script" : m;
 }
 function photoUploadPending() {
   var cfg = syncCfg();
@@ -1206,32 +1184,22 @@ function photoUploadPending() {
         var f = findCatch(it.id);
         if (!f || !f.c.photo) return qDel(it.id);                 // la cattura non esiste più
         return photoPost(cfg, { action: "upload", name: it.name, mime: "image/jpeg", data: String(it.data).split(",")[1] })
-          .then(function (resp) {
-            if (!resp.id) throw new Error(SCRIPT_OLD);             // risposta di uno script vecchio: la foto NON è stata salvata
-            f.c.photo.id = resp.id; delete PH.err[it.id]; saveEvents(); return qDel(it.id);
-          })
-          .catch(function (e) { PH.err[it.id] = photoErrText(e); });   // la foto resta in coda e si riprova
+          .then(function (resp) { f.c.photo.id = resp.id; saveEvents(); return qDel(it.id); });
       });
     });
     return chain;
-  }).catch(function () {}).then(function () { PH.busy = false; return photoStatusRefresh(); });
-}
-function photoState(c) {
-  if (c.photo && c.photo.id) return { icon: "\u2601\ufe0f", text: "Salvata su Drive" };
-  if (PH.err[c.id]) return { icon: "\u26a0\ufe0f", text: "Caricamento non riuscito: " + PH.err[c.id] };
-  return { icon: "\u23f3", text: "In attesa di caricamento su Drive" };
+  }).catch(function () {}).then(function () { PH.busy = false; });
 }
 // foto intera: prima quella ancora in coda sul telefono, poi quella su Drive
 function photoFetch(c) {
-  return qGet(c.id).then(function (it) {
+  return qGet(c.id).catch(function () { return null; }).then(function (it) {
     if (it && it.data) return it.data;
     var id = c.photo && c.photo.id;
     if (id && PH.cache[id]) return PH.cache[id];
     var cfg = syncCfg();
-    if (!id) throw new Error("La foto intera non è su Drive: il telefono che l\u2019ha scattata non l\u2019ha ancora caricata." + (PH.err[c.id] ? " (" + PH.err[c.id] + ")" : ""));
+    if (!id) throw new Error(cfg ? "In caricamento: verrà salvata su Drive appena c\u2019è rete." : "Collega la sincronizzazione per salvare e vedere la foto intera.");
     if (!cfg) throw new Error("Collega la sincronizzazione per vedere la foto intera.");
     return photoPost(cfg, { action: "photo", id: id }).then(function (resp) {
-      if (!resp.data) throw new Error(SCRIPT_OLD);
       var src = "data:" + resp.mime + ";base64," + resp.data; PH.cache[id] = src; return src;
     });
   });
@@ -1239,61 +1207,16 @@ function photoFetch(c) {
 function photoView(c) {
   var ov = el("div", "viewer"), im = el("img"), tx = el("div", "vt", "Caricamento foto\u2026");
   im.src = c.photo.th; im.alt = c.fish; ov.appendChild(im); ov.appendChild(tx);
-  var retry = el("button", "btn small", "Riprova il caricamento su Drive"); retry.style.marginTop = "10px"; retry.hidden = true;
-  retry.onclick = function (e) {
-    e.stopPropagation(); tx.textContent = "Carico su Drive\u2026";
-    photoUploadPending().then(function () { var s = photoState(c); tx.textContent = s.icon + " " + s.text; retry.hidden = !!(c.photo && c.photo.id); });
-  };
-  ov.appendChild(retry);
   ov.onclick = function () { ov.remove(); };
   document.body.appendChild(ov);
-  var s0 = photoState(c);
-  photoFetch(c).then(function (src) { im.src = src; tx.textContent = c.fish + " \u00b7 " + c.who + " \u00b7 " + s0.icon + " " + s0.text + " \u00b7 tocca per chiudere"; retry.hidden = s0.icon === "\u2601\ufe0f"; })
-    .catch(function (e) { tx.textContent = ((e && e.message) || "Foto intera non disponibile") + " \u00b7 tocca per chiudere"; retry.hidden = !!(c.photo && c.photo.id); });
+  photoFetch(c).then(function (src) { im.src = src; tx.textContent = c.fish + " \u00b7 " + c.who + " \u00b7 tocca per chiudere"; })
+    .catch(function (e) { tx.textContent = ((e && e.message) || "Foto intera non disponibile") + " \u00b7 tocca per chiudere"; });
 }
-// Pulsanti "Scatta foto" e "Libreria / file" mostrati nell'ultimo passo dell'inserimento di una cattura
-function photoBarEl(getPh, setPh) {
-  var box = el("div"); box.style.marginTop = "6px";
-  var bar = el("div", "bar"); bar.style.marginTop = "0";
-  var prev = el("div", "note");
-  function draw() {
-    prev.innerHTML = "";
-    var ph = getPh();
-    if (ph) {
-      var im = el("img", "cthumb"); im.src = ph.th; im.alt = "Foto allegata"; im.style.verticalAlign = "middle"; prev.appendChild(im);
-      prev.appendChild(document.createTextNode(" Foto pronta: scegli ora l\u2019opzione per salvare la cattura. "));
-      var rm = el("button", "link", "Rimuovi"); rm.type = "button"; rm.onclick = function () { setPh(null); draw(); };
-      prev.appendChild(rm);
-    } else prev.textContent = "Facoltativo: allega la foto prima di scegliere l\u2019opzione.";
-  }
-  function take(capture) {
-    pickImage(function (file) {
-      prev.textContent = "Elaboro la foto\u2026";
-      photoProcess(file).then(function (ph) { setPh(ph); draw(); }, function () { setPh(null); draw(); alert("Immagine non valida."); });
-    }, capture);
-  }
-  var b1 = el("button", "btn small", "\ud83d\udcf7 Scatta foto"), b2 = el("button", "btn small", "\ud83d\uddbc\ufe0f Libreria / file");
-  b1.type = "button"; b2.type = "button";
-  b1.onclick = function () { take(true); }; b2.onclick = function () { take(false); };
-  bar.appendChild(b1); bar.appendChild(b2); box.appendChild(bar); box.appendChild(prev); draw();
-  return box;
-}
-// Stato delle foto nel riquadro di sincronizzazione
-function photoStatusRefresh() {
-  if (!PH.statusEl) return Promise.resolve();
-  return qAll().then(function (items) {
-    var n = (items || []).length, errs = Object.keys(PH.err).map(function (k) { return PH.err[k]; }).filter(Boolean);
-    if (PH.statusEl && PH.statusEl.isConnected !== false)
-      PH.statusEl.textContent = n ? "Foto in attesa di caricamento: " + n + (errs.length ? " \u2014 ultimo errore: " + errs[errs.length - 1] : "") + "." : "Nessuna foto in attesa di caricamento.";
-  });
-}
-function photoCheckScript(target) {
-  var cfg = syncCfg();
-  if (!cfg) { target.textContent = "Prima collega l\u2019app allo script."; return; }
-  target.textContent = "Controllo lo script\u2026";
-  fetch(cfg.url).then(function (r) { return r.json(); }).then(function (j) {
-    target.textContent = j && j.foto ? "Script aggiornato: le foto sono supportate." : "Lo script risponde ma NON è la versione con le foto: " + SCRIPT_OLD + ".";
-  }).catch(function () { target.textContent = "Impossibile raggiungere lo script (controlla indirizzo e rete)."; });
+function photoToggleEl(get, set) {
+  var lb = el("label", "pick"); lb.style.marginTop = "6px";
+  var cb = el("input"); cb.type = "checkbox"; cb.checked = get(); cb.onchange = function () { set(cb.checked); };
+  lb.appendChild(cb); lb.appendChild(el("span", "nm", "\ud83d\udcf7 Allega la foto del pesce"));
+  return lb;
 }
 
 // ---------- CLASSIFICA ----------
@@ -1479,7 +1402,6 @@ function dayPairs(ev, d, pairs) {
           var cth = el("img", "cthumb"); cth.src = c.photo.th; cth.alt = "Foto di " + c.fish;
           cth.onclick = function () { photoView(c); };
           cr.appendChild(cth);
-          var pst = photoState(c), psp = el("span", "pst", pst.icon); psp.title = pst.text; cr.appendChild(psp);
         }
         cr.appendChild(el("span", "", c.fish + " \u00b7 " + c.size + (c.method ? " \u00b7 " + METHOD_LBL[c.method] : "") + (c.depth ? " \u00b7 " + DEPTH_LBL[c.depth] : "") + " \u00b7 " + ptsTxt(c.points)));
         var x = el("button", "x2", "\u2715"); x.type = "button"; x.setAttribute("aria-label", "Rimuovi cattura");
@@ -1488,22 +1410,20 @@ function dayPairs(ev, d, pairs) {
           ev.catches[d] = ev.catches[d].filter(function (z) { return z !== c; });
           saveEvents(); refresh();
         };
-        function addPhoto(capture) {
+        var cam = el("button", "x2", "\ud83d\udcf7"); cam.type = "button"; cam.style.marginLeft = "auto"; x.style.marginLeft = "0";
+        cam.setAttribute("aria-label", c.photo ? "Cambia foto" : "Aggiungi foto");
+        cam.onclick = function () {
           pickImage(function (file) {
             photoProcess(file).then(function (ph) { setCatchPhoto(c, ph, ev, d); refresh(); }, function () { alert("Immagine non valida."); });
-          }, capture);
-        }
-        var cam = el("button", "x2", "\ud83d\udcf7"), lib = el("button", "x2", "\ud83d\uddbc\ufe0f");
-        cam.type = "button"; lib.type = "button"; cam.style.marginLeft = "auto"; lib.style.marginLeft = "0"; x.style.marginLeft = "0";
-        cam.setAttribute("aria-label", "Scatta una foto"); lib.setAttribute("aria-label", "Scegli dalla libreria o dai file");
-        cam.onclick = function () { addPhoto(true); }; lib.onclick = function () { addPhoto(false); };
-        cr.appendChild(cam); cr.appendChild(lib); cr.appendChild(x); fr.appendChild(cr);
+          });
+        };
+        cr.appendChild(cam); cr.appendChild(x); fr.appendChild(cr);
       });
       cks(ev, d).forEach(function (c) { if (c.scope === "single" && c.who === name && (c.t || 0) === cur) fr.appendChild(cookieRow(c, "")); });
 
       var panel = el("div", "panel"); panel.hidden = true;
       var mode = "";
-      var pendingPhoto = null;
+      var wantPhoto = false;
       function stepFish() {
         panel.innerHTML = "";
         var evFish = getEvFish();
@@ -1527,16 +1447,18 @@ function dayPairs(ev, d, pairs) {
         splash(f.name); saveEvents(); refresh();
         if (ph) photoQueue(rec, ph, ev, d);
       }
-      // la foto (se allegata con i pulsanti) viene salvata insieme alla cattura
+      // se "Allega la foto" è spuntato, dopo l'ultima scelta si apre fotocamera/galleria e poi si salva
       function finish(f, i, method, pts, depth) {
-        var ph = pendingPhoto; pendingPhoto = null;
-        commit(f, i, method, pts, depth, ph);
+        if (!wantPhoto) return commit(f, i, method, pts, depth, null);
+        pickImage(function (file) {
+          photoProcess(file).then(function (ph) { commit(f, i, method, pts, depth, ph); }, function () { alert("Immagine non valida."); });
+        });
       }
       function stepDepth(f, i, o) {
         panel.innerHTML = "";
         var t = f.tiers[i];
         panel.appendChild(el("div", "note", f.name + " \u00b7 " + tierLabel(f, i) + " \u00b7 " + o[0].toLowerCase() + ": dove l\u2019ha preso " + name + "?"));
-        panel.appendChild(photoBarEl(function () { return pendingPhoto; }, function (v) { pendingPhoto = v; }));
+        panel.appendChild(photoToggleEl(function () { return wantPhoto; }, function (v) { wantPhoto = v; }));
         [["Sottoriva", "sottoriva", -PENM], ["Batimetrie importanti", "profondo", 0]].sort(function (a, b) { return a[2] - b[2]; }).forEach(function (x) {
           var pts = r2(Math.max(0, t.points + o[2] + x[2]));
           var b = el("button", "opt"); b.type = "button";
@@ -1552,7 +1474,7 @@ function dayPairs(ev, d, pairs) {
         panel.innerHTML = "";
         var t = f.tiers[i];
         panel.appendChild(el("div", "note", f.name + " \u00b7 " + tierLabel(f, i) + ": come l\u2019ha preso " + name + "?"));
-        if (!f.special) panel.appendChild(photoBarEl(function () { return pendingPhoto; }, function (v) { pendingPhoto = v; }));
+        if (!f.special) panel.appendChild(photoToggleEl(function () { return wantPhoto; }, function (v) { wantPhoto = v; }));
         var opts = f.special ? [["Mangiato", "mangiato", 0], ["Arpionato", "arpionato", -PENM]]
                              : [["A mosca", "mosca", 0], ["Pesca retrograda", "retrograda", -PENM]];
         opts.sort(function (a, b) { return a[2] - b[2]; });

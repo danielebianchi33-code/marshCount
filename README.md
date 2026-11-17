@@ -56,7 +56,3 @@ Per attivarlo, aggiorna lo script (l'indirizzo `/exec` **non cambia** se aggiorn
 3. Distribuisci > Gestisci distribuzioni > matita (modifica) > Versione: **Nuova versione** > Distribuisci.
 
 Senza rete la foto resta in coda sul telefono e parte da sola appena torna la connessione.
-
-Per controllare che lo script sia aggiornato: nel riquadro **Sincronizzazione** tocca **Verifica script**
-(oppure apri l'indirizzo `/exec` nel browser: deve comparire `"foto":true`). Le foto non ancora caricate
-si vedono con ⏳ (in attesa) o ⚠️ (errore) accanto alla miniatura, e si rimandano con **Invia foto in attesa**.
