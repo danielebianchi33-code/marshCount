@@ -43,3 +43,16 @@ vengono inviati da nessuna parte e non sono condivisi tra telefoni diversi. Usa
 
 La sincronizzazione funziona solo dall'app pubblicata (GitHub Pages) o installata, non dall'anteprima di Claude.
 Se modifichi lo script, crea una **nuova distribuzione** o aggiorna la versione di quella esistente.
+
+## Foto delle catture (Google Drive)
+
+Quando registri una cattura puoi spuntare **Allega la foto del pesce**, oppure aggiungerla dopo con il pulsante 📷
+accanto alla cattura. La foto intera va in una cartella di Google Drive (di default `MarshCount foto`, nome
+modificabile in cima a `marshcount-script.gs`); la miniatura viaggia insieme ai dati e si vede su tutti i telefoni.
+
+Per attivarlo, aggiorna lo script (l'indirizzo `/exec` **non cambia** se aggiorni la distribuzione esistente):
+1. Apps Script: sostituisci tutto il codice con quello di `marshcount-script.gs` e rimetti la tua password.
+2. Dal menu delle funzioni scegli `autorizza` e premi **Esegui**: concedi l'accesso a Google Drive.
+3. Distribuisci > Gestisci distribuzioni > matita (modifica) > Versione: **Nuova versione** > Distribuisci.
+
+Senza rete la foto resta in coda sul telefono e parte da sola appena torna la connessione.

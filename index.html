@@ -151,6 +151,10 @@ input:focus,textarea:focus{outline:3px solid var(--accent);outline-offset:1px}
 .fishph.wide{width:200px;height:134px}
 .fishph.wide img{object-fit:contain}
 input[type=password]{width:100%;padding:14px;font-size:1rem;border:1px solid var(--border);border-radius:12px;background:var(--card);color:var(--text);min-width:0}
+.cthumb{width:38px;height:38px;border-radius:8px;object-fit:cover;flex:none;cursor:pointer;border:1px solid var(--border)}
+.viewer{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px}
+.viewer img{max-width:100%;max-height:78vh;border-radius:12px}
+.viewer .vt{color:#fff;margin-top:12px;text-align:center;font-size:.9rem}
 @keyframes pop{from{opacity:0;transform:translateY(12px) scale(.98)}to{opacity:1;transform:none}}
 @keyframes pulse{50%{transform:scale(1.12)}}
 @keyframes wob{0%,100%{transform:rotate(-12deg)}50%{transform:rotate(12deg) scale(1.15)}}
@@ -606,6 +610,34 @@ function fixFishFlags() {
   var ch = false;
   fish.forEach(function (f) {
     if (f.special === undefined) { f.special = SPECIAL_FISH.indexOf(String(f.name).toLowerCase()) >= 0; ch = true; }
+    if (f.unit === undefined) { f.unit = SPECIAL_FISH.indexOf(String(f.name).toLowerCase()) >= 0 ? "kg" : "cm"; ch = true; }   // i tre pesci speciali si pesano in kg
+  });
+  if (ch) saveFish();
+}
+// Taglie e punteggi di partenza: [soglia, punti]; null = "oltre l'ultima soglia"
+var FISH_TIERS = {
+  "dore": { u: "cm", t: [[20, 3], [50, 1], [null, 5]] },
+  "luccio": { u: "cm", t: [[20, 3], [60, 1], [99, 3], [null, 5]] },
+  "marscione": { u: "kg", t: [[120, 0.5], [null, 1]] },
+  "pinocchio": { u: "kg", t: [[120, 1], [null, 2]] },
+  "salmerino alpino": { u: "cm", t: [[20, 1], [35, 2], [null, 3]] },
+  "salmerino fontinalis": { u: "cm", t: [[20, 1], [35, 2], [null, 3]] },
+  "salmone atlantico": { u: "cm", t: [[20, 3], [50, 1], [80, 3], [null, 5]] },
+  "storione bianco": { u: "kg", t: [[120, 3], [null, 5]] },
+  "striped bass": { u: "cm", t: [[20, 3], [50, 1], [90, 3], [null, 5]] },
+  "trota fario": { u: "cm", t: [[20, 1], [35, 2], [null, 3]] },
+  "trota iridea": { u: "cm", t: [[20, 1], [35, 2], [null, 3]] }
+};
+function tiersFromTable(k) { return FISH_TIERS[k].t.map(function (x) { return { max: x[0], points: x[1] }; }); }
+function isPlaceholderTiers(t) {
+  return t.length === 3 && t[0].max === 20 && t[0].points === 0.5 && t[1].max === 35 && t[1].points === 1 && t[2].max === null && t[2].points === 5;
+}
+// Sostituisce solo le taglie provvisorie mai modificate: quelle già inserite a mano non si toccano
+function fixFishTiers() {
+  var ch = false;
+  fish.forEach(function (f) {
+    var k = fishKey(f.name), d = FISH_TIERS[k];
+    if (d && isPlaceholderTiers(f.tiers)) { f.tiers = tiersFromTable(k); f.unit = d.u; ch = true; }
   });
   if (ch) saveFish();
 }
@@ -613,7 +645,8 @@ function seedFish() {
   try { if (localStorage.getItem("coppie.seed.pesci.v1")) return; } catch (e) { return; }
   BASE_FISH.forEach(function (n, i) {
     if (fish.some(function (f) { return f.name.toLowerCase() === n.toLowerCase(); })) return;
-    fish.push({ id: "base" + i, name: n, photo: null, tiers: [{ max: 20, points: 0.5 }, { max: 35, points: 1 }, { max: null, points: 5 }] });
+    var dt = FISH_TIERS[fishKey(n)];
+    fish.push({ id: "base" + i, name: n, photo: null, unit: dt ? dt.u : "cm", tiers: dt ? tiersFromTable(fishKey(n)) : [{ max: 20, points: 0.5 }, { max: 35, points: 1 }, { max: null, points: 5 }] });
   });
   saveFish();
   try { localStorage.setItem("coppie.seed.pesci.v1", "1"); } catch (e) {}
@@ -674,11 +707,12 @@ function banner() {
 function nf(n) { return Number(n).toLocaleString("it-IT", { maximumFractionDigits: 2 }); }
 function ptsTxt(p) { return nf(p) + (p === 1 ? " punto" : " punti"); }
 function num(v) { var x = parseFloat(String(v).trim().replace(",", ".")); return isNaN(x) ? null : x; }
+function unitOf(f) { return (f && f.unit) || "cm"; }
 function tierLines(f) {
   return f.tiers.map(function (t, i) {
     var prev = i > 0 ? f.tiers[i - 1].max : null, lab;
-    if (t.max === null) lab = prev === null ? "qualsiasi misura" : "oltre " + nf(prev) + " cm";
-    else lab = prev === null ? "fino a " + nf(t.max) + " cm" : "da " + nf(prev) + " a " + nf(t.max) + " cm";
+    if (t.max === null) lab = prev === null ? "qualsiasi misura" : "oltre " + nf(prev) + " " + unitOf(f);
+    else lab = prev === null ? "fino a " + nf(t.max) + " " + unitOf(f) : "da " + nf(prev) + " a " + nf(t.max) + " " + unitOf(f);
     return lab + " \u2192 " + ptsTxt(t.points);
   });
 }
@@ -691,10 +725,10 @@ function openFish(id) {
   var f = fish.filter(function (x) { return x.id === id; })[0];
   var c = function (v) { return String(v).replace(".", ","); };
   if (f) {
-    draft = { id: f.id, name: f.name, photo: f.photo, special: !!f.special,
+    draft = { id: f.id, name: f.name, photo: f.photo, special: !!f.special, unit: f.unit || "cm",
       rows: f.tiers.filter(function (t) { return t.max !== null; }).map(function (t) { return { max: c(t.max), pts: c(t.points) }; }),
       last: c(f.tiers[f.tiers.length - 1].points) };
-  } else draft = { id: null, name: "", photo: null, special: false, rows: [{ max: "", pts: "" }], last: "" };
+  } else draft = { id: null, name: "", photo: null, special: false, unit: "cm", rows: [{ max: "", pts: "" }], last: "" };
   go("fish", id || "new");
 }
 function renderFish(app) {
@@ -723,14 +757,16 @@ function renderFish(app) {
   var spl = el("label", "pick"); spl.style.marginTop = "12px";
   var spc = el("input"); spc.type = "checkbox"; spc.checked = !!draft.special;
   spc.onchange = function () { draft.special = spc.checked; };
-  var spt = el("span", "", "Pesce da mangiare o arpionare");
+  var spt = el("span", "", "Attiva l’opzione mangiato/arpionato per questo pesce");
   var sps = el("div", "note", "Invece di \u201ca mosca / retrograda\u201d si sceglie \u201cmangiato\u201d (punteggio pieno) o \u201carpionato\u201d (\u22120,5)."); sps.style.margin = "2px 0 0";
   var spw = el("div"); spw.appendChild(spt); spw.appendChild(sps);
   spl.appendChild(spc); spl.appendChild(spw); app.appendChild(spl);
 
+  var ulb = el("label", "f", "Le taglie si misurano in"); app.appendChild(ulb);
+  app.appendChild(seg(["Centimetri (cm)", "Chilogrammi (kg)"], draft.unit === "kg" ? 1 : 0, function (i) { draft.unit = i === 1 ? "kg" : "cm"; drawTiers(); }));
   var sec = el("div", "sec");
   sec.appendChild(el("h2", "", "Taglie e punteggi"));
-  sec.appendChild(el("p", "note", "Ogni soglia include la misura indicata: \u201cfino a 20 cm\u201d vale anche per un pesce di 20 cm esatti. L\u2019ultima riga vale per tutte le misure oltre l\u2019ultima soglia."));
+  sec.appendChild(el("p", "note", "Ogni soglia include la misura indicata: \u201cfino a 20\u201d vale anche per una misura di 20 esatti. L\u2019ultima riga vale per tutte le misure oltre l\u2019ultima soglia."));
   var box = el("div"); sec.appendChild(box);
   var lastLbl;
   function maxVal() {
@@ -738,7 +774,7 @@ function renderFish(app) {
     draft.rows.forEach(function (r) { var v = num(r.max); if (v !== null && (m === null || v > m)) m = v; });
     return m;
   }
-  function updLast() { var m = maxVal(); lastLbl.textContent = m === null ? "Altre misure" : "Oltre " + nf(m) + " cm"; }
+  function updLast() { var m = maxVal(); lastLbl.textContent = m === null ? "Altre misure" : "Oltre " + nf(m) + " " + draft.unit; }
   function field(val, ph2, label, cb) {
     var i = el("input"); i.type = "text"; i.value = val; i.placeholder = ph2; i.setAttribute("inputmode", "decimal"); i.setAttribute("aria-label", label);
     i.oninput = function () { cb(i.value); }; return i;
@@ -748,8 +784,8 @@ function renderFish(app) {
     draft.rows.forEach(function (r, idx) {
       var row = el("div", "trow");
       row.appendChild(el("span", "tl", "Fino a"));
-      row.appendChild(field(r.max, "cm", "Soglia in centimetri", function (v) { r.max = v; updLast(); }));
-      row.appendChild(el("span", "u", "cm \u2192"));
+      row.appendChild(field(r.max, draft.unit, "Soglia", function (v) { r.max = v; updLast(); }));
+      row.appendChild(el("span", "u", draft.unit + " \u2192"));
       row.appendChild(field(r.pts, "punti", "Punti", function (v) { r.pts = v; }));
       row.appendChild(el("span", "u", "pt"));
       var x = el("button", "btn x", "\u2715"); x.type = "button"; x.setAttribute("aria-label", "Rimuovi taglia");
@@ -777,7 +813,7 @@ function renderFish(app) {
     var tiers = [];
     for (var i = 0; i < draft.rows.length; i++) {
       var m = num(draft.rows[i].max), p = num(draft.rows[i].pts);
-      if (m === null || m <= 0) { err.textContent = "Controlla le soglie: servono misure in cm maggiori di zero."; return; }
+      if (m === null || m <= 0) { err.textContent = "Controlla le soglie: servono misure maggiori di zero."; return; }
       if (p === null || p < 0) { err.textContent = "Controlla i punti: servono numeri da zero in su."; return; }
       tiers.push({ max: m, points: p });
     }
@@ -786,7 +822,7 @@ function renderFish(app) {
     var lp = num(draft.last);
     if (lp === null || lp < 0) { err.textContent = tiers.length ? "Indica i punti per le misure oltre l\u2019ultima soglia." : "Indica i punti del pesce."; return; }
     tiers.push({ max: null, points: lp });
-    var rec = { id: draft.id || Date.now().toString(36), name: name, photo: draft.photo, special: !!draft.special, tiers: tiers };
+    var rec = { id: draft.id || Date.now().toString(36), name: name, photo: draft.photo, special: !!draft.special, unit: draft.unit || "cm", tiers: tiers };
     var k = fish.findIndex(function (x) { return x.id === rec.id; });
     if (k >= 0) fish[k] = rec; else fish.push(rec);
     saveFish(); draft = null; go("home");
@@ -876,7 +912,7 @@ function syncHash(s) { var h = 5381; for (var i = 0; i < s.length; i++) h = ((h 
 function syncBuild() {
   var m = {};
   m["part"] = JSON.stringify({ names: state.names, bios: state.bios });
-  fish.forEach(function (f) { m["fish:" + f.id] = JSON.stringify({ id: f.id, name: f.name, special: !!f.special, tiers: f.tiers }); });
+  fish.forEach(function (f) { m["fish:" + f.id] = JSON.stringify({ id: f.id, name: f.name, special: !!f.special, unit: f.unit || "cm", tiers: f.tiers }); });
   events.forEach(function (ev) {
     if (!ev.id) return;
     m["ev:" + ev.id] = JSON.stringify({ id: ev.id, name: ev.name, start: ev.start, end: ev.end, fish: ev.fish || [], players: ev.players || null, soloOrder: ev.soloOrder || null });
@@ -908,8 +944,8 @@ function syncPut(r) {
   if (t === "fish") {
     var i = fish.findIndex(function (f) { return f.id === p[1]; });
     if (r.d) { if (i >= 0) fish.splice(i, 1); return; }
-    if (i >= 0) { fish[i].name = v.name; fish[i].special = v.special; fish[i].tiers = v.tiers; }
-    else fish.push({ id: v.id, name: v.name, photo: null, special: v.special, tiers: v.tiers });
+    if (i >= 0) { fish[i].name = v.name; fish[i].special = v.special; fish[i].tiers = v.tiers; if (v.unit) fish[i].unit = v.unit; }
+    else fish.push({ id: v.id, name: v.name, photo: null, special: v.special, unit: v.unit || "cm", tiers: v.tiers });
     return;
   }
   if (t === "ev") {
@@ -1011,7 +1047,7 @@ function syncNow() {
       take(resp);
     });
   }).then(function () {
-    meta.lastOk = Date.now(); SYNC.at = meta.lastOk; lsSet(K_SMETA, meta); setSyncStatus("ok");
+    meta.lastOk = Date.now(); SYNC.at = meta.lastOk; lsSet(K_SMETA, meta); setSyncStatus("ok"); photoUploadPending();
   }).catch(function (e) {
     var m = String((e && e.message) || e);
     setSyncStatus("error", /Failed to fetch|NetworkError|Load failed|fetch/i.test(m) ? "impossibile raggiungere il foglio (controlla indirizzo e rete)" : m);
@@ -1062,6 +1098,125 @@ function syncBox() {
   bar.appendChild(bs); bar.appendChild(bn); bar.appendChild(bx);
   [l1, u, l2, p, bar, st].forEach(function (x) { d.appendChild(x); });
   return d;
+}
+
+// ---------- FOTO DELLE CATTURE ----------
+// La miniatura viaggia dentro il record della cattura (si vede subito su tutti i telefoni);
+// la foto intera va su Google Drive tramite lo stesso script e si scarica solo quando la apri.
+var PH = { busy: false, cache: {} };
+function idb() {
+  return new Promise(function (res, rej) {
+    if (typeof indexedDB === "undefined") return rej(new Error("no idb"));
+    var rq = indexedDB.open("marshcount-foto", 1);
+    rq.onupgradeneeded = function () { rq.result.createObjectStore("queue", { keyPath: "id" }); };
+    rq.onsuccess = function () { res(rq.result); };
+    rq.onerror = function () { rej(rq.error); };
+  });
+}
+function idbDo(mode, fn) {
+  return idb().then(function (db) {
+    return new Promise(function (res, rej) {
+      var tx = db.transaction("queue", mode), r = fn(tx.objectStore("queue"));
+      tx.oncomplete = function () { res(r && r.result); };
+      tx.onerror = function () { rej(tx.error); };
+    });
+  });
+}
+function qPut(item) { return idbDo("readwrite", function (st) { return st.put(item); }); }
+function qGet(id) { return idbDo("readonly", function (st) { return st.get(id); }); }
+function qDel(id) { return idbDo("readwrite", function (st) { return st["delete"](id); }); }
+function qAll() { return idbDo("readonly", function (st) { return st.getAll(); }); }
+
+// Ridimensiona: foto intera max 1280 px, miniatura max 160 px
+function photoProcess(file) {
+  return new Promise(function (res, rej) {
+    var url = URL.createObjectURL(file), img = new Image();
+    img.onload = function () {
+      function scale(max, q) {
+        var r = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.width * r)); c.height = Math.max(1, Math.round(img.height * r));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        return c.toDataURL("image/jpeg", q);
+      }
+      var out = { full: scale(1280, 0.8), th: scale(160, 0.55) };
+      URL.revokeObjectURL(url); res(out);
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); rej(new Error("immagine non valida")); };
+    img.src = url;
+  });
+}
+function pickImage(cb) {
+  var i = document.createElement("input"); i.type = "file"; i.accept = "image/*";
+  i.onchange = function () { if (i.files && i.files[0]) cb(i.files[0]); };
+  i.click();
+}
+function findCatch(cid) {
+  for (var a = 0; a < events.length; a++) {
+    var cs = events[a].catches || {};
+    for (var d in cs) { var c = (cs[d] || []).filter(function (x) { return x.id === cid; })[0]; if (c) return { c: c, ev: events[a], d: d }; }
+  }
+  return null;
+}
+// accoda la foto intera per il caricamento su Drive (si manda appena c'è rete)
+function photoQueue(c, ph, ev, d) {
+  var name = [d, ev.name, c.who, c.fish, Date.now().toString(36)].join("_").replace(/[^\w.\-]+/g, "_") + ".jpg";
+  return qPut({ id: c.id, data: ph.full, name: name }).catch(function () {}).then(function () { return photoUploadPending(); });
+}
+function setCatchPhoto(c, ph, ev, d) {
+  c.photo = { th: ph.th, id: "" };
+  saveEvents();
+  return photoQueue(c, ph, ev, d);
+}
+function photoPost(cfg, body) {
+  body.pw = cfg.pw;
+  return fetch(cfg.url, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body) })
+    .then(function (r) { return r.json(); })
+    .then(function (resp) { if (!resp.ok) throw new Error(resp.error === "password" ? "password errata" : (resp.error || "errore")); return resp; });
+}
+function photoUploadPending() {
+  var cfg = syncCfg();
+  if (!cfg || PH.busy || (typeof navigator !== "undefined" && navigator.onLine === false)) return Promise.resolve();
+  PH.busy = true;
+  return qAll().then(function (items) {
+    var chain = Promise.resolve();
+    (items || []).forEach(function (it) {
+      chain = chain.then(function () {
+        var f = findCatch(it.id);
+        if (!f || !f.c.photo) return qDel(it.id);                 // la cattura non esiste più
+        return photoPost(cfg, { action: "upload", name: it.name, mime: "image/jpeg", data: String(it.data).split(",")[1] })
+          .then(function (resp) { f.c.photo.id = resp.id; saveEvents(); return qDel(it.id); });
+      });
+    });
+    return chain;
+  }).catch(function () {}).then(function () { PH.busy = false; });
+}
+// foto intera: prima quella ancora in coda sul telefono, poi quella su Drive
+function photoFetch(c) {
+  return qGet(c.id).catch(function () { return null; }).then(function (it) {
+    if (it && it.data) return it.data;
+    var id = c.photo && c.photo.id;
+    if (id && PH.cache[id]) return PH.cache[id];
+    var cfg = syncCfg();
+    if (!id) throw new Error(cfg ? "In caricamento: verrà salvata su Drive appena c\u2019è rete." : "Collega la sincronizzazione per salvare e vedere la foto intera.");
+    if (!cfg) throw new Error("Collega la sincronizzazione per vedere la foto intera.");
+    return photoPost(cfg, { action: "photo", id: id }).then(function (resp) {
+      var src = "data:" + resp.mime + ";base64," + resp.data; PH.cache[id] = src; return src;
+    });
+  });
+}
+function photoView(c) {
+  var ov = el("div", "viewer"), im = el("img"), tx = el("div", "vt", "Caricamento foto\u2026");
+  im.src = c.photo.th; im.alt = c.fish; ov.appendChild(im); ov.appendChild(tx);
+  ov.onclick = function () { ov.remove(); };
+  document.body.appendChild(ov);
+  photoFetch(c).then(function (src) { im.src = src; tx.textContent = c.fish + " \u00b7 " + c.who + " \u00b7 tocca per chiudere"; })
+    .catch(function (e) { tx.textContent = ((e && e.message) || "Foto intera non disponibile") + " \u00b7 tocca per chiudere"; });
+}
+function photoToggleEl(get, set) {
+  var lb = el("label", "pick"); lb.style.marginTop = "6px";
+  var cb = el("input"); cb.type = "checkbox"; cb.checked = get(); cb.onchange = function () { set(cb.checked); };
+  lb.appendChild(cb); lb.appendChild(el("span", "nm", "\ud83d\udcf7 Allega la foto del pesce"));
+  return lb;
 }
 
 // ---------- CLASSIFICA ----------
@@ -1131,12 +1286,11 @@ function renderRank(app) {
 function r2(x) { return Math.round(x * 100) / 100; }
 function tierLabel(f, i) {
   var t = f.tiers[i], prev = i > 0 ? f.tiers[i - 1].max : null;
-  if (t.max === null) return prev === null ? "qualsiasi misura" : "oltre " + nf(prev) + " cm";
-  return prev === null ? "fino a " + nf(t.max) + " cm" : "da " + nf(prev) + " a " + nf(t.max) + " cm";
+  if (t.max === null) return prev === null ? "qualsiasi misura" : "oltre " + nf(prev) + " " + unitOf(f);
+  return prev === null ? "fino a " + nf(t.max) + " " + unitOf(f) : "da " + nf(prev) + " a " + nf(t.max) + " " + unitOf(f);
 }
 var PEN = 5;
 var PENM = 0.5;   // penalità tecnica: retrograda / arpionato
-var DEPTHB = 0.5;  // bonus batimetrie importanti (solo pesci speciali)
 var DEPTH_LBL = { sottoriva: "sottoriva", profondo: "batimetrie importanti" };
 var METHOD_LBL = { mosca: "a mosca", retrograda: "retrograda", mangiato: "mangiato", arpionato: "arpionato" };
 function cks(ev, d) { return (ev.cookies && ev.cookies[d]) || []; }
@@ -1244,6 +1398,11 @@ function dayPairs(ev, d, pairs) {
       list.forEach(function (c) {
         if (c.who !== name) return;
         var cr = el("div", "cr");
+        if (c.photo && c.photo.th) {
+          var cth = el("img", "cthumb"); cth.src = c.photo.th; cth.alt = "Foto di " + c.fish;
+          cth.onclick = function () { photoView(c); };
+          cr.appendChild(cth);
+        }
         cr.appendChild(el("span", "", c.fish + " \u00b7 " + c.size + (c.method ? " \u00b7 " + METHOD_LBL[c.method] : "") + (c.depth ? " \u00b7 " + DEPTH_LBL[c.depth] : "") + " \u00b7 " + ptsTxt(c.points)));
         var x = el("button", "x2", "\u2715"); x.type = "button"; x.setAttribute("aria-label", "Rimuovi cattura");
         x.onclick = function () {
@@ -1251,12 +1410,20 @@ function dayPairs(ev, d, pairs) {
           ev.catches[d] = ev.catches[d].filter(function (z) { return z !== c; });
           saveEvents(); refresh();
         };
-        cr.appendChild(x); fr.appendChild(cr);
+        var cam = el("button", "x2", "\ud83d\udcf7"); cam.type = "button"; cam.style.marginLeft = "auto"; x.style.marginLeft = "0";
+        cam.setAttribute("aria-label", c.photo ? "Cambia foto" : "Aggiungi foto");
+        cam.onclick = function () {
+          pickImage(function (file) {
+            photoProcess(file).then(function (ph) { setCatchPhoto(c, ph, ev, d); refresh(); }, function () { alert("Immagine non valida."); });
+          });
+        };
+        cr.appendChild(cam); cr.appendChild(x); fr.appendChild(cr);
       });
       cks(ev, d).forEach(function (c) { if (c.scope === "single" && c.who === name && (c.t || 0) === cur) fr.appendChild(cookieRow(c, "")); });
 
       var panel = el("div", "panel"); panel.hidden = true;
       var mode = "";
+      var wantPhoto = false;
       function stepFish() {
         panel.innerHTML = "";
         var evFish = getEvFish();
@@ -1271,23 +1438,33 @@ function dayPairs(ev, d, pairs) {
           panel.appendChild(b);
         });
       }
-      function commit(f, i, method, pts, depth) {
+      function commit(f, i, method, pts, depth, ph) {
         if (!ev.catches) ev.catches = {};
         var rec = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5), who: name, fishId: f.id, fish: f.name, size: tierLabel(f, i), method: method, points: pts, t: cur };
         if (depth) rec.depth = depth;
+        if (ph) rec.photo = { th: ph.th, id: "" };
         (ev.catches[d] = ev.catches[d] || []).push(rec);
         splash(f.name); saveEvents(); refresh();
+        if (ph) photoQueue(rec, ph, ev, d);
+      }
+      // se "Allega la foto" è spuntato, dopo l'ultima scelta si apre fotocamera/galleria e poi si salva
+      function finish(f, i, method, pts, depth) {
+        if (!wantPhoto) return commit(f, i, method, pts, depth, null);
+        pickImage(function (file) {
+          photoProcess(file).then(function (ph) { commit(f, i, method, pts, depth, ph); }, function () { alert("Immagine non valida."); });
+        });
       }
       function stepDepth(f, i, o) {
         panel.innerHTML = "";
         var t = f.tiers[i];
         panel.appendChild(el("div", "note", f.name + " \u00b7 " + tierLabel(f, i) + " \u00b7 " + o[0].toLowerCase() + ": dove l\u2019ha preso " + name + "?"));
-        [["Sottoriva", "sottoriva", 0], ["Batimetrie importanti", "profondo", DEPTHB]].forEach(function (x) {
+        panel.appendChild(photoToggleEl(function () { return wantPhoto; }, function (v) { wantPhoto = v; }));
+        [["Sottoriva", "sottoriva", -PENM], ["Batimetrie importanti", "profondo", 0]].sort(function (a, b) { return a[2] - b[2]; }).forEach(function (x) {
           var pts = r2(Math.max(0, t.points + o[2] + x[2]));
           var b = el("button", "opt"); b.type = "button";
           b.appendChild(el("span", "", x[0]));
           b.appendChild(el("span", "s", ptsTxt(pts)));
-          b.onclick = function () { commit(f, i, o[1], pts, x[1]); };
+          b.onclick = function () { finish(f, i, o[1], pts, x[1]); };
           panel.appendChild(b);
         });
         var bk = el("button", "link", "\u2190 Cambia tecnica"); bk.type = "button"; bk.onclick = function () { stepMethod(f, i); };
@@ -1297,14 +1474,16 @@ function dayPairs(ev, d, pairs) {
         panel.innerHTML = "";
         var t = f.tiers[i];
         panel.appendChild(el("div", "note", f.name + " \u00b7 " + tierLabel(f, i) + ": come l\u2019ha preso " + name + "?"));
+        if (!f.special) panel.appendChild(photoToggleEl(function () { return wantPhoto; }, function (v) { wantPhoto = v; }));
         var opts = f.special ? [["Mangiato", "mangiato", 0], ["Arpionato", "arpionato", -PENM]]
                              : [["A mosca", "mosca", 0], ["Pesca retrograda", "retrograda", -PENM]];
+        opts.sort(function (a, b) { return a[2] - b[2]; });
         opts.forEach(function (o) {
           var pts = r2(Math.max(0, t.points + o[2]));
           var b = el("button", "opt"); b.type = "button";
           b.appendChild(el("span", "", o[0]));
           b.appendChild(el("span", "s", ptsTxt(pts)));
-          b.onclick = function () { if (f.special) stepDepth(f, i, o); else commit(f, i, o[1], pts, ""); };
+          b.onclick = function () { if (f.special) stepDepth(f, i, o); else finish(f, i, o[1], pts, ""); };
           panel.appendChild(b);
         });
         var bk = el("button", "link", "\u2190 Cambia taglia"); bk.type = "button"; bk.onclick = function () { stepTier(f); };
@@ -1517,6 +1696,7 @@ function importAll(text) {
 fillDefaultBios();
 seedFish();
 fixFishFlags();
+fixFishTiers();
 startSync();
 render();
 // Offline: registra il service worker e chiede al telefono di non cancellare i dati
