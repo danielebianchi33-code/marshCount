@@ -1,6 +1,6 @@
 // MarshCount - service worker: tiene l'app disponibile senza connessione.
 // Se pubblichi una nuova versione dei file, cambia il numero qui sotto.
-const CACHE = "marshcount-v1";
+const CACHE = "marshcount-v0.8";
 const FILES = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
