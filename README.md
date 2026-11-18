@@ -35,7 +35,7 @@ vengono inviati da nessuna parte e non sono condivisi tra telefoni diversi. Usa
 
 1. Crea un Google Foglio vuoto (ad esempio `MarshCount`).
 2. Estensioni > Apps Script: incolla il contenuto di `marshcount-script.gs` (file a parte, non va su GitHub)
-   e cambia la password nella prima riga.
+   (la lista dei 6 utenti è già dentro; non serve cambiare nulla).
 3. Distribuisci > Nuova distribuzione > App web. Esegui come: io. Chi ha accesso: chiunque. Autorizza i permessi.
 4. Copia l'indirizzo che finisce con `/exec`.
 5. In MarshCount, in fondo alla home, apri **Sincronizzazione (Google Fogli)**, incolla indirizzo e password
@@ -60,3 +60,62 @@ Senza rete la foto resta in coda sul telefono e parte da sola appena torna la co
 Per controllare che lo script sia aggiornato: nel riquadro **Sincronizzazione** tocca **Verifica script**
 (oppure apri l'indirizzo `/exec` nel browser: deve comparire `"foto":true`). Le foto non ancora caricate
 si vedono con ⏳ (in attesa) o ⚠️ (errore) accanto alla miniatura, e si rimandano con **Invia foto in attesa**.
+
+## Notifiche push (Firebase)
+
+Quando qualcuno registra una cattura, gli altri telefoni ricevono: chi ha preso il pesce, il pesce, il punteggio finale
+e una frase per consolarsi. Non arriva a chi ha inserito la cattura né al pescatore che l'ha presa.
+
+Una volta sola, tu:
+1. console.firebase.google.com > Aggiungi progetto (Analytics non serve).
+2. Impostazioni progetto > Generali > Le tue app > icona Web `</>` > registra l'app: copia i valori `firebaseConfig`.
+3. Impostazioni progetto > Cloud Messaging > Configurazione web > Genera coppia di chiavi: copia la chiave pubblica (`vapidKey`).
+4. Impostazioni progetto > Account di servizio > Genera nuova chiave privata: scarica il file JSON (resta segreto).
+5. Apps Script > Impostazioni progetto > Proprietà script, aggiungi:
+   - `FIREBASE_WEB_CONFIG` = {"apiKey":"…","authDomain":"…","projectId":"…","storageBucket":"…","messagingSenderId":"…","appId":"…","vapidKey":"…"}
+   - `FCM_SERVICE_ACCOUNT` = l'intero contenuto del file JSON del punto 4
+6. Sostituisci il codice dello script con il nuovo `marshcount-script.gs`, esegui `autorizza` (concedi i permessi) e crea una **nuova versione** della distribuzione.
+
+Su ogni telefono: installa l'app (iPhone: Safari > Condividi > Aggiungi alla schermata Home, iOS 16.4 o successivo, e apri dall'icona),
+poi in fondo alla home apri **Notifiche push**, scegli chi sei e tocca **Attiva notifiche** e poi **Invia notifica di prova**.
+
+## Login (solo i 6 pescatori)
+
+Per entrare servono email e password. Entrano solo i 6 pescatori elencati in `USERS` nello script
+(nessuno può registrarsi). Le password non sono scritte da nessuna parte: nello script ci sono solo
+sale e impronta (hash), e nell'app non c'è nessuna email.
+
+- Il **primo accesso** su ogni telefono richiede la rete e l'indirizzo `/exec` dello script (si inserisce una volta sola).
+  Poi l'accesso resta memorizzato, anche offline, fino a **Esci** (in fondo alla home).
+- Dopo 5 tentativi sbagliati l'accesso si blocca per 15 minuti.
+- Il riquadro **Sincronizzazione** non chiede più la password condivisa: usa l'accesso del login.
+- Il telefono associa da solo l'utente al suo pescatore: le notifiche push usano quel nome.
+- **Per aggiornare lo script prima dell'app:** incolla il nuovo `marshcount-script.gs`, Distribuisci > Gestisci distribuzioni > Nuova versione.
+  Poi carica `index.html` e `sw.js` su GitHub. I telefoni con la vecchia versione dell'app non sincronizzano più finché non si aggiornano.
+- **Cambiare una password:** serve una nuova impronta nello script (chiedila a Claude): i vecchi accessi di quell'utente smettono di valere.
+- **Disconnettere tutti:** in Apps Script > Impostazioni progetto > Proprietà script, elimina `TOKEN_SECRET`.
+
+## Amministratori e utenti normali
+
+- **Amministratori** (all'inizio DaDo e Jonny): creano e modificano eventi, scelgono partecipanti e pesci dell'evento,
+  gestiscono il catalogo pesci, sorteggiano e cambiano le coppie, importano i backup.
+- **Utenti normali**: inserendo catture e biscotti per sé e per i compagni del proprio gruppo (coppia o trio del turno),
+  possono anche cancellarli. Vedono tutto il resto, ma non lo modificano. Consigli e profili restano aperti a tutti.
+- La casella **Amministratore** è nel profilo di ogni pescatore e la cambiano solo gli amministratori. Deve restare almeno un amministratore.
+- I limiti li fa rispettare anche lo script (non solo i pulsanti). Un cambio di ruolo arriva ai telefoni con la prossima sincronizzazione.
+- Gli amministratori iniziali sono in `DEFAULT_ADMINS` nello script; una volta cambiati dall'app, vale la lista salvata nelle Proprietà script (`ADMINS`).
+
+## Notifica di sorpasso
+
+Dopo ogni modifica fatta su un telefono (pesce, biscotto, cancellazione, cambio di coppie) l'app confronta la classifica
+dell'evento con quella di prima. Chi era davanti e ora sta dietro riceve una notifica con i nomi di chi lo ha superato
+e il suo punteggio attuale. Un pareggio non è un sorpasso. La notifica parte dal telefono che ha fatto la modifica
+(non da quelli che ricevono i dati dopo) e non arriva a chi sorpassa. Per usarla serve lo script aggiornato.
+
+## Link d'invito (niente indirizzo da incollare)
+
+Dopo il login, in fondo alla home il pulsante **Copia link d'invito** copia un link del tipo
+`https://TUO-UTENTE.github.io/marshcount/?s=INDIRIZZO-DELLO-SCRIPT`. Mandalo ai 6 pescatori: aprendolo, l'app memorizza
+l'indirizzo (poi lo toglie dalla barra) e il login chiede solo email e password. L'indirizzo non è scritto nel codice su GitHub.
+Se l'app è già collegata, il link non cambia nulla. Su iPhone apri il link in Safari, aggiungi l'app alla schermata Home e aprila da lì:
+se il campo dell'indirizzo ricompare, incolla l'indirizzo una volta (si fa una volta sola).
