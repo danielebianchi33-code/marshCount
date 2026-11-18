@@ -119,3 +119,23 @@ Dopo il login, in fondo alla home il pulsante **Copia link d'invito** copia un l
 l'indirizzo (poi lo toglie dalla barra) e il login chiede solo email e password. L'indirizzo non è scritto nel codice su GitHub.
 Se l'app è già collegata, il link non cambia nulla. Su iPhone apri il link in Safari, aggiungi l'app alla schermata Home e aprila da lì:
 se il campo dell'indirizzo ricompare, incolla l'indirizzo una volta (si fa una volta sola).
+
+## Foto di pesci e profili su Drive
+
+Le foto dei pesci (caricate da un amministratore) e quelle dei profili vanno nella stessa cartella di Drive delle foto delle
+catture (`MarshCount foto`). Nei dati viaggia solo il loro codice: gli altri telefoni scaricano la foto e la tengono in memoria,
+quindi non si perdono più, nemmeno cancellando i dati del sito o cambiando telefono. Le foto già presenti sui telefoni
+(amministratori per i pesci, ognuno per il proprio profilo) vengono caricate in automatico alla prima sincronizzazione dopo
+l'aggiornamento. Serve lo script aggiornato (nuova versione della distribuzione).
+
+## Profili
+
+I profili (nomi, descrizioni, foto) li modificano solo gli amministratori, sia nell'app sia nello script. Serve lo script aggiornato.
+
+## Consigli
+
+I consigli vanno sul foglio (righe `idea:`). Solo gli amministratori vedono il pulsante "Elimina"; lo script rifiuta le eliminazioni degli altri. Un consiglio eliminato resta sul foglio come riga marcata come cancellata.
+
+## Frasi delle notifiche
+
+L'archivio `NOTIF_DB` dentro `index.html` contiene 100 frasi per le catture e 100 per i sorpassi. Ogni telefono le pesca a rotazione, senza ripeterne una finché non sono uscite tutte. Il file `notifiche-db.json` (nella cartella del progetto) è la stessa lista in forma leggibile.
