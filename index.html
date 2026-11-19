@@ -491,7 +491,7 @@ function render() {
   else if (view.screen === "profile") renderProfile(app);
   else if (view.screen === "event") renderEvent(app);
   else renderHome(app);
-  app.appendChild(el("p", "foot", "\u00a9 Pess, Grapin e Capott - 2026 - v 3.0.0"));
+  app.appendChild(el("p", "foot", "\u00a9 Pess, Grapin e Capott - 2026 - v 3.0.1"));
 }
 function pairsBlock(pairs) {
   var box = el("div", "pairs");
@@ -2045,15 +2045,15 @@ function pushPhrase(who, fish, pts) {
   else if (pts >= 4) for (i = 0; i < c.high.length; i++) allowed.push(n + c.low.length + i);
   return notifPick("c" + (pts <= 1 ? "l" : pts >= 4 ? "h" : "g"), all, allowed).replace(/\{chi\}/g, who).replace(/\{pesce\}/g, fish);
 }
-function notifBuild(c) {
-  return { id: c.id, who: c.who, t: Date.now(),
+function notifBuild(c, ev) {
+  return { id: c.id, who: c.who, t: Date.now(), to: ev ? eventPlayers(ev) : undefined,   // to = solo i partecipanti dell'evento
     title: "\ud83c\udfa3 " + c.who + " ha preso: " + c.fish,
     body: ptsTxt(c.points) + ". " + pushPhrase(c.who, c.fish, c.points) };
 }
-function notifyCatch(c) {
+function notifyCatch(c, ev) {
   if (!syncCfg()) return;
   var q = lsGet(K_NQ) || [];
-  q.push(notifBuild(c)); lsSet(K_NQ, q);
+  q.push(notifBuild(c, ev)); lsSet(K_NQ, q);
   notifFlush();
 }
 // invia le notifiche in coda (subito, oppure quando torna la rete); quelle più vecchie di 12 ore si scartano
@@ -2067,7 +2067,7 @@ function notifFlush() {
   var chain = Promise.resolve();
   q.forEach(function (n) {
     chain = chain.then(function () {
-      return photoPost(cfg, { action: "notify", id: n.id, who: n.who, toWho: n.toWho, device: deviceId(), title: n.title, body: n.body, url: "./" })
+      return photoPost(cfg, { action: "notify", id: n.id, who: n.who, toWho: n.toWho, to: n.to, device: deviceId(), title: n.title, body: n.body, url: "./" })
         .then(function () { lsSet(K_NQ, (lsGet(K_NQ) || []).filter(function (x) { return x.id !== n.id; })); })
         .catch(function () {});                                     // resta in coda e si riprova
     });
@@ -2796,7 +2796,7 @@ function dayPairs(ev, d, pairs) {
         (ev.catches[d] = ev.catches[d] || []).push(rec);
         splash(f.name); saveEvents(); refresh();
         if (ph) photoQueue(rec, ph, ev, d);
-        notifyCatch(rec);
+        notifyCatch(rec, ev);
         congrats(name);
       }
       // la foto (se allegata con i pulsanti) viene salvata insieme alla cattura
