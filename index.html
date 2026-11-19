@@ -524,10 +524,10 @@ function renderHome(app) {
   app.appendChild(banner());
   app.appendChild(el("p", "sub", "Crea un evento e sorteggia le coppie giorno per giorno."));
   var nb = el("button", "btn main", "+ Nuovo evento"); nb.onclick = function () { go("new"); };
-  if (isAdmin()) app.appendChild(nb);
 
   var sec = el("div", "sec");
   sec.appendChild(el("h2", "", "Eventi"));
+  if (isAdmin()) { nb.style.marginBottom = "10px"; sec.appendChild(nb); }      // il pulsante sta all'inizio della sezione
   if (!events.length) sec.appendChild(el("p", "note", "Ancora nessun evento."));
   events.slice().sort(function (a, b) { return a.start < b.start ? 1 : -1; }).forEach(function (ev) {
     var tot = range(ev.start, ev.end).length, done = Object.keys(ev.days).length;
@@ -542,6 +542,9 @@ function renderHome(app) {
   // pesci
   var fs = el("div", "sec");
   fs.appendChild(el("h2", "", "Pesci e punteggi"));
+  var nf2 = el("button", "btn main", "+ Aggiungi pesce"); nf2.style.marginBottom = "10px";
+  nf2.onclick = function () { openFish(null); };
+  if (isAdmin()) fs.appendChild(nf2);                                            // il pulsante sta all'inizio della sezione
   if (!fish.length) fs.appendChild(el("p", "note", "Ancora nessun pesce nel catalogo."));
   fish.slice().sort(function (a, b) { return a.name.localeCompare(b.name, "it"); }).forEach(function (f) {
     var c = el("div", isAdmin() ? "card tap fcard" : "card fcard");
@@ -555,9 +558,6 @@ function renderHome(app) {
     if (isAdmin()) c.onclick = function () { openFish(f.id); };
     fs.appendChild(c);
   });
-  var nf2 = el("button", "btn main", "+ Aggiungi pesce"); nf2.style.marginTop = "10px";
-  nf2.onclick = function () { openFish(null); };
-  if (isAdmin()) fs.appendChild(nf2);
   app.appendChild(fold("pesci", fs));
 
   // partecipanti
