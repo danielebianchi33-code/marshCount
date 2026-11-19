@@ -139,3 +139,19 @@ I consigli vanno sul foglio (righe `idea:`). Solo gli amministratori vedono il p
 ## Frasi delle notifiche
 
 L'archivio `NOTIF_DB` dentro `index.html` contiene 100 frasi per le catture e 100 per i sorpassi. Ogni telefono le pesca a rotazione, senza ripeterne una finché non sono uscite tutte. Il file `notifiche-db.json` (nella cartella del progetto) è la stessa lista in forma leggibile.
+
+## Foto grande del profilo
+
+Gli amministratori possono cambiare la foto grande di ogni profilo ("Modifica profilo" → "Cambia foto grande"): dopo la scelta si sistema il cerchio con trascinamento e zoom. La foto grande e il cerchio vanno su Drive e si sincronizzano come le altre foto. Se la foto grande viene rimossa, torna quella di fabbrica. Lo script non cambia.
+
+## Colonna sonora
+
+Nella home, prima di backup e sincronizzazione, c'è la sezione con il link alla playlist Spotify e un player incorporato che si carica solo al tocco di "Ascolta qui". Serve la rete; senza accesso a Spotify i brani durano 30 secondi. Per cambiare playlist basta sostituire `SPOTIFY_PL` in `index.html`.
+
+## Slider di foto
+
+Nella home, tra i partecipanti e la colonna sonora, scorrono a caso le foto della cartella `slider` dentro la cartella `marshCount` su Drive.
+Serve lo script aggiornato (nuova versione della distribuzione). Le foto sono lette solo da chi ha fatto il login e solo da quella cartella.
+Si scarica una foto alla volta, ridotta a 1100 px e tenuta nella memoria del telefono. I file HEIC (e quelli sopra i 6 MB) arrivano come anteprima di Drive.
+Se la cartella non si trova, la sezione resta nascosta. Per usare un'altra cartella: proprietà dello script `SLIDER_FOLDER_ID` con l'ID della cartella.
+Il service worker non cancella più la memoria delle foto dello slider quando si aggiorna l'app.

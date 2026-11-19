@@ -1,6 +1,6 @@
 // MarshCount - service worker: tiene l'app disponibile senza connessione e mostra le notifiche push.
 // Se pubblichi una nuova versione dei file, cambia il numero qui sotto.
-const CACHE = "marshcount-v27";
+const CACHE = "marshcount-v28";
 const FILES = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
@@ -10,7 +10,7 @@ self.addEventListener("install", (e) => {
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k.indexOf("marshcount-slider") !== 0).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
