@@ -32,7 +32,7 @@ button{font-family:inherit;font-size:1rem}
 .link{background:none;border:0;color:var(--accent);padding:6px 0;font-weight:600;margin-bottom:6px}
 .bar{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 label.f{display:block;font-weight:600;margin:16px 0 6px}
-input[type=text],input[type=date],input[type=email]{width:100%;padding:14px;font-size:1rem;border:1px solid var(--border);border-radius:12px;background:var(--card);color:var(--text);min-width:0}
+input[type=text],input[type=date],input[type=email],input[type=time]{width:100%;padding:14px;font-size:1rem;border:1px solid var(--border);border-radius:12px;background:var(--card);color:var(--text);min-width:0}
 .card{padding:14px;background:var(--card);border:1px solid var(--border);border-radius:12px;margin-top:10px}
 .card.tap{cursor:pointer}
 .card .t{font-weight:600;font-size:1.05rem}
@@ -60,6 +60,11 @@ textarea{width:100%;min-height:120px;margin-top:10px;padding:10px;font-family:ui
 .cr label{display:flex;align-items:center;gap:6px;font-size:.85rem;color:var(--muted)}
 .cr label input{width:20px;height:20px;margin:0;accent-color:var(--accent)}
 .seg{display:flex;gap:8px;margin-top:8px}
+.hrow{display:flex;align-items:center;gap:8px;margin-top:8px}
+.hrow span{flex:1;min-width:0;font-size:.92rem}
+.hrow input{width:auto;flex:none;padding:10px 8px}
+.awplan{white-space:pre-line;margin:6px 0 0}
+.cdown{margin:8px 0 0;font-weight:700;color:var(--accent)}
 .seg .btn{flex:1;padding:10px 8px}
 .btn.on{background:var(--accent);color:var(--accent-t);border-color:var(--accent)}
 .panel input[type=text]{margin-top:8px}
@@ -363,6 +368,7 @@ function usedPairs(ev, skipDay, skipTurn) {
   Object.keys(ev.days).sort().forEach(function (d) {
     turnsOf(ev, d).forEach(function (groups, t) {
       if (d === skipDay && t === skipTurn) return;
+      if (contTurn(ev, d, t)) return;                                   // continua il turno di ieri: coppie già contate
       var ps = groups.filter(function (p) { return p.length === 2 && pl.indexOf(p[0]) >= 0 && pl.indexOf(p[1]) >= 0; });
       if (ps.some(function (p) { return used[pk(p[0], p[1])]; })) { used = {}; n = 0; }   // giro chiuso in anticipo
       ps.forEach(function (p) { var k = pk(p[0], p[1]); if (!used[k]) { used[k] = 1; n++; } });
@@ -389,6 +395,63 @@ function lastPairsBefore(ev, d, k) {
   });
   return last;
 }
+// ---------- TUTTI PESCANO CON TUTTI ----------
+// Con la casella attiva le ore di pesca dell'evento si dividono in parti uguali per i turni che servono perché ognuno
+// peschi con tutti (4 pescatori: 3 turni; 5 o 6: 5 turni). Un turno può continuare il giorno dopo con le stesse coppie.
+// Se i giorni bastano (giorni ≥ turni) resta un turno al giorno, come senza casella.
+var AW_DEF = { from: "08:00", to: "18:00" };
+function awTurns(n) { return n === 4 ? 3 : n >= 5 ? 5 : 0; }
+function hm(s) { var p = String(s || "").split(":"); return (+p[0] || 0) * 60 + (+p[1] || 0); }
+function hmTxt(m) { m = Math.round(m); return pad(Math.floor(m / 60) % 24) + ":" + pad(m % 60); }
+function durTxt(m) { m = Math.round(m); var h = Math.floor(m / 60), r = m % 60; return h && r ? h + " h " + r + " min" : h ? h + " h" : r + " min"; }
+function hoursOk(h) { return !!h && /^\d\d:\d\d$/.test(h.from || "") && /^\d\d:\d\d$/.test(h.to || "") && hm(h.to) > hm(h.from); }
+function awHours(ev, d) { var h = ev.hours && ev.hours[d]; return hoursOk(h) ? h : AW_DEF; }
+function awPlan(ev) {
+  var N = awTurns(eventPlayers(ev).length);
+  if (!ev.allWith || !N) return null;
+  var days = range(ev.start, ev.end);
+  if (days.length >= N) return { N: N, daily: true, days: days };
+  var lens = days.map(function (d) { var h = awHours(ev, d); return hm(h.to) - hm(h.from); });
+  var T = lens.reduce(function (a, b) { return a + b; }, 0), per = {}, S = 0;
+  days.forEach(function (d, k) {
+    var f0 = hm(awHours(ev, d).from), segs = [];
+    for (var j = 0; j < N; j++) {
+      var a = Math.round(j * T / N), b = Math.round((j + 1) * T / N), x = Math.max(a, S), y = Math.min(b, S + lens[k]);
+      if (y > x) segs.push({ j: j, from: f0 + x - S, to: f0 + y - S, cont: a < S });   // cont: il turno era già iniziato il giorno prima
+    }
+    per[d] = segs; S += lens[k];
+  });
+  return { N: N, daily: false, T: T, L: T / N, per: per, days: days };
+}
+// Countdown del prossimo cambio coppie nel giorno di oggi: parte all'ora d'inizio pesca, a zero dice che è ora di cambiare.
+// Il promemoria vero (notifica) lo manda lo script; qui si guarda solo l'orologio del telefono.
+var CD = { timer: null };
+function awCountdownText(ev, d, segs, now) {
+  var s = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds(), cur = turnsOf(ev, d).length - 1;
+  if (!segs.length || s < segs[0].from * 60 || cur < 0 || cur >= segs.length - 1) return "";
+  var at = segs[cur].to * 60, left = at - s;
+  if (left <= 0) return "\ud83d\udd01 \u00c8 ora di cambiare le coppie! Tocca a un amministratore premere \u201cCambia coppie\u201d.";
+  var h = Math.floor(left / 3600), m = Math.floor(left % 3600 / 60), x = left % 60;
+  return "\u23f0 Cambio coppie tra " + (h ? h + ":" + pad(m) : m) + ":" + pad(x) + " (alle " + hmTxt(segs[cur].to) + ")";
+}
+function awCountdown(ev, d, segs) {
+  var p = el("p", "cdown"); p.setAttribute("role", "timer");
+  function show() { var t = awCountdownText(ev, d, segs, new Date()); p.textContent = t; p.style.display = t ? "" : "none"; }
+  show();
+  if (CD.timer) clearInterval(CD.timer);
+  CD.timer = setInterval(function () { if (!p.isConnected) { clearInterval(CD.timer); CD.timer = null; return; } show(); }, 1000);
+  return p;
+}
+// il turno t del giorno d continua l'ultimo turno del giorno prima (stesse coppie): non conta come abbinamento nuovo
+function contTurn(ev, d, t) { return t === 0 && !!(ev.cont && ev.cont[d]); }
+// coppie con cui iniziare il giorno d se secondo il piano il turno continua da ieri (null = si sorteggia normalmente)
+function awStartCont(ev, d) {
+  var pl = awPlan(ev);
+  if (!pl || pl.daily || !pl.per[d] || !pl.per[d].length || !pl.per[d][0].cont) return null;
+  var k = pl.days.indexOf(d), prev = k > 0 ? turnsOf(ev, pl.days[k - 1]) : [];
+  return prev.length ? JSON.parse(JSON.stringify(prev[prev.length - 1])) : null;
+}
+
 // ---------- 5 partecipanti, formato 3 contro 2 ----------
 // Un giro = 5 turni: ognuno sta 2 volte in coppia e 3 volte in trio. Due giri (10 turni) esauriscono tutte le 10 coppie possibili.
 function allPairs(pl) { var o = []; for (var i = 0; i < pl.length; i++) for (var j = i + 1; j < pl.length; j++) o.push([pl[i], pl[j]]); return o; }
@@ -400,6 +463,7 @@ function state32(ev, d, k) {
   Object.keys(ev.days).sort().forEach(function (dd) {
     turnsOf(ev, dd).forEach(function (g, t) {
       if (!(dd < d || (dd === d && t < k))) return;
+      if (contTurn(ev, dd, t)) return;                                  // continua il turno di ieri: già contato
       var pr = g.filter(function (x) { return x.length === 2; })[0];
       if (!pr || !g.some(function (x) { return x.length === 3; })) return;      // solo i turni in formato 3 contro 2
       if (used[pk(pr[0], pr[1])] || pr.some(function (p) { return cnt[p] >= 2; })) { used = {}; nu = 0; cnt = zero(); tc = 0; }   // giro chiuso in anticipo
@@ -491,7 +555,7 @@ function render() {
   else if (view.screen === "profile") renderProfile(app);
   else if (view.screen === "event") renderEvent(app);
   else renderHome(app);
-  app.appendChild(el("p", "foot", "\u00a9 Pess, Grapin e Capott - 2026 - v 3.0.1"));
+  app.appendChild(el("p", "foot", "\u00a9 Pess, Grapin e Capott - 2026 - v 3.2.0"));
 }
 function pairsBlock(pairs) {
   var box = el("div", "pairs");
@@ -601,7 +665,8 @@ function renderNew(app) {
   var s = el("input"); s.type = "date"; s.id = "evstart"; s.value = today();
   var l3 = el("label", "f", "Data di fine"); l3.htmlFor = "evend";
   var e = el("input"); e.type = "date"; e.id = "evend"; e.value = today();
-  s.onchange = function () { if (e.value < s.value) e.value = s.value; };
+  s.onchange = function () { if (e.value < s.value) e.value = s.value; awBox.redraw(); };
+  e.onchange = function () { awBox.redraw(); };
   var err = el("div", "err"); err.setAttribute("role", "alert");
   var b = el("button", "btn main", "Crea evento"); b.style.marginTop = "20px";
   b.onclick = function () {
@@ -611,7 +676,10 @@ function renderNew(app) {
     if (e.value < s.value) { err.textContent = "La data di fine non può precedere quella di inizio."; return; }
     if (range(s.value, e.value).length > 366) { err.textContent = "L\u2019evento può durare al massimo 366 giorni."; return; }
     if (pls.length < 2) { err.textContent = "Scegli almeno 2 partecipanti."; return; }
+    var awOn = awDraft.allWith && awTurns(pls.length) > 0, rg = range(s.value, e.value);
+    if (awOn && rg.some(function (d) { return !hoursOk(awDraft.hours[d]); })) { err.textContent = "Controlla gli orari: in ogni giorno l\u2019ora di fine deve venire dopo quella di inizio."; return; }
     var ev = { id: Date.now().toString(36), name: name, start: s.value, end: e.value, days: {}, fish: ids.slice(), players: pls.slice(), mode5: pls.length === 5 ? m5 : "2v2v1" };
+    if (awOn) { ev.allWith = true; ev.hours = {}; rg.forEach(function (d) { ev.hours[d] = { from: awDraft.hours[d].from, to: awDraft.hours[d].to }; }); }
     events.push(ev); saveEvents(); go("event", ev.id);
   };
   var ids = [];
@@ -623,10 +691,63 @@ function renderNew(app) {
   mbox.appendChild(seg(["2 contro 2 contro 1", "3 contro 2"], 0, function (i) { m5 = i === 1 ? "3v2" : "2v2v1"; }));
   mbox.appendChild(el("p", "note", "2 contro 2 contro 1: due coppie e uno da solo a rotazione. 3 contro 2: un trio e una coppia; nel punteggio di squadra ogni pesce vale \u00d71,5 per la coppia e \u00d71 per il trio."));
   function updM5() { mbox.style.display = pls.length === 5 ? "" : "none"; }
-  var pp = playerPicker(pls, updM5); updM5();
+  var awDraft = { allWith: false, hours: {} };
+  var awBox = awEditor(awDraft, function () { return s.value && e.value && e.value >= s.value ? range(s.value, e.value) : []; },
+    function () { return pls.length; }, function () {});
+  var pp = playerPicker(pls, function () { updM5(); awBox.redraw(); }); updM5();
   var l4 = el("label", "f", "Pesci pescabili (opzionale)");
   var pk = fishPicker(ids, function () {}, false);
-  [l1, n, l2, s, l3, e, l0, nt0, pp, mbox, l4, pk, b, err].forEach(function (x) { app.appendChild(x); });
+  [l1, n, l2, s, l3, e, l0, nt0, pp, mbox, awBox, l4, pk, b, err].forEach(function (x) { app.appendChild(x); });
+}
+
+// Casella «Tutti pescano con tutti» + orari di pesca giorno per giorno. o = { allWith, hours } (bozza o evento).
+// days(): giorni dell'evento; npl(): numero di partecipanti; onSave(): chiamata a ogni modifica valida.
+function awEditor(o, days, npl, onSave) {
+  var box = el("div"); box.style.marginTop = "14px";
+  var lb = el("label", "pick");
+  var cb = el("input"); cb.type = "checkbox"; cb.checked = !!o.allWith; cb.id = "awchk";
+  var tx = el("div"); tx.appendChild(el("span", "", "Tutti pescano con tutti"));
+  var nt = el("div", "note", ""); nt.style.margin = "2px 0 0"; tx.appendChild(nt);
+  lb.appendChild(cb); lb.appendChild(tx); box.appendChild(lb);
+  var rows = el("div"), err = el("div", "err"); err.setAttribute("role", "alert");
+  box.appendChild(rows); box.appendChild(err);
+  if (!o.hours) o.hours = {};
+  cb.onchange = function () { o.allWith = cb.checked; redraw(); onSave(); };
+  function redraw() {
+    var n = npl(), N = awTurns(n), ds = days();
+    rows.innerHTML = ""; err.textContent = "";
+    if (!N) { box.style.display = "none"; return; }
+    box.style.display = "";
+    nt.textContent = ds.length >= N
+      ? "Con " + n + " pescatori servono " + N + " turni: con " + ds.length + " giorni basta un turno al giorno, le coppie cambiano ogni mattina."
+      : "Con " + n + " pescatori servono " + N + " turni. Le ore di pesca qui sotto si dividono in " + N + " turni uguali; un turno pu\u00f2 continuare il giorno dopo.";
+    if (!o.allWith) return;
+    var first = ds[0], base = (o.hours[first] && hoursOk(o.hours[first])) ? o.hours[first] : AW_DEF, tot = 0;
+    ds.forEach(function (d) {
+      if (!hoursOk(o.hours[d])) o.hours[d] = { from: base.from, to: base.to };
+      var h = o.hours[d], r = el("div", "hrow");
+      r.appendChild(el("span", "", parse(d).toLocaleDateString("it-IT", { weekday: "short", day: "numeric", month: "short" })));
+      var a = el("input"); a.type = "time"; a.value = h.from; a.setAttribute("aria-label", "Inizio pesca " + longDate(d));
+      var z = el("input"); z.type = "time"; z.value = h.to; z.setAttribute("aria-label", "Fine pesca " + longDate(d));
+      function upd() {
+        var nh = { from: a.value, to: z.value };
+        if (!hoursOk(nh)) { err.textContent = "L\u2019ora di fine deve venire dopo quella di inizio (" + longDate(d) + ")."; return; }
+        var old = o.hours[d];
+        if (d === first) ds.forEach(function (x) {                       // il primo giorno fa da modello: si copia sui giorni rimasti uguali a lui
+          var hx = o.hours[x]; if (x !== first && hx && hx.from === old.from && hx.to === old.to) o.hours[x] = { from: nh.from, to: nh.to };
+        });
+        o.hours[d] = nh;
+        redraw(); onSave();
+      }
+      a.onchange = upd; z.onchange = upd;
+      r.appendChild(a); r.appendChild(el("span", "", "\u2013")).style.flex = "none"; r.appendChild(z);
+      rows.appendChild(r);
+      tot += hm(h.to) - hm(h.from);
+    });
+    if (ds.length && ds.length < N) rows.appendChild(el("p", "note", "Totale " + durTxt(tot) + " di pesca: " + N + " turni da " + durTxt(tot / N) + "."));
+  }
+  box.redraw = redraw; redraw();
+  return box;
 }
 
 // ---------- EVENTO ----------
@@ -696,12 +817,32 @@ function renderEvent(app) {
   dt.appendChild(el("p", "note", "Scegli dal catalogo i pesci che si potranno pescare in questo evento."));
   dt.appendChild(fishPicker(ev.fish, function () { saveEvents(); updSm(); }, true));
   if (adm) app.appendChild(dt);
+  if (adm && awTurns(eventPlayers(ev).length)) {
+    var da = el("details"); da.style.marginTop = "0"; da.style.marginBottom = "18px";
+    da.appendChild(el("summary", "", "Turni e orari" + (ev.allWith ? " \u00b7 tutti con tutti" : "")));
+    da.appendChild(el("p", "note", "Si pu\u00f2 cambiare in ogni momento: i turni gi\u00e0 sorteggiati restano come sono, cambia solo come si procede da qui in avanti."));
+    da.appendChild(awEditor(ev, function () { return all; }, function () { return eventPlayers(ev).length; },
+      function () { saveEvents(); var y = window.scrollY; render(); window.scrollTo(0, y); var x = document.querySelector("details.awd"); if (x) x.open = true; }));
+    da.className = "awd";
+    app.appendChild(da);
+  }
+  var plan = awPlan(ev);
+  if (plan) app.appendChild(el("p", "note", plan.daily
+    ? "Tutti pescano con tutti: bastano " + plan.N + " turni e l\u2019evento dura " + plan.days.length + " giorni, quindi un turno al giorno con coppie sempre nuove."
+    : "Tutti pescano con tutti: " + plan.N + " turni da " + durTxt(plan.L) + " (" + durTxt(plan.T) + " di pesca in totale). Quando \u00e8 ora, un amministratore preme \u201cCambia coppie\u201d."));
   var err = el("div", "err"); err.setAttribute("role", "alert");
   all.forEach(function (d) {
     var c = el("div", "card day");
     var t = el("div", "d", longDate(d));
     if (d === today()) t.appendChild(el("span", "badge", "Oggi"));
     c.appendChild(t);
+    if (plan) {
+      var hh = awHours(ev, d), segs = plan.daily ? null : plan.per[d] || [];
+      var txt = "\ud83d\udd57 Si pesca dalle " + hh.from + " alle " + hh.to;
+      if (segs) segs.forEach(function (sg, i) { txt += "\nTurno " + (i + 1) + (sg.cont ? " (continua da ieri)" : "") + ": " + hmTxt(sg.from) + "\u2013" + hmTxt(sg.to); });
+      c.appendChild(el("p", "note awplan", txt));
+      if (!plan.daily && d === today() && ev.days[d]) c.appendChild(awCountdown(ev, d, segs));
+    }
     var has = ev.days[d];
     if (has) c.appendChild(dayPairs(ev, d, has));
     var b = el("button", "btn small", has ? "Rigenera" : "Genera coppie"); b.style.marginTop = "10px";
@@ -712,7 +853,9 @@ function renderEvent(app) {
       if (!m && npl < 2) m = "Scegli almeno 2 partecipanti per questo evento.";
       if (m) { err.textContent = m; window.scrollTo(0, document.body.scrollHeight); return; }
       if (has && !confirm(regenMsg(ev, d))) return;
-      var trn = turnsOf(ev, d).slice(), kk = has ? trn.length - 1 : 0, gg = makeGroupsFor(ev, d, kk);
+      var trn = turnsOf(ev, d).slice(), kk = has ? trn.length - 1 : 0;
+      var cg = !has ? awStartCont(ev, d) : null, gg = cg || makeGroupsFor(ev, d, kk);   // tutti con tutti: il turno di ieri pu\u00f2 continuare
+      if (kk === 0) { if (!ev.cont) ev.cont = {}; if (cg) ev.cont[d] = 1; else delete ev.cont[d]; }
       trn[kk] = gg; if (!ev.turns) ev.turns = {};
       ev.turns[d] = trn; ev.days[d] = gg;
       if (ev.cookies && ev.cookies[d]) ev.cookies[d] = ev.cookies[d].filter(function (c) { return c.scope !== "pair" || (c.t || 0) !== kk; });
@@ -721,8 +864,8 @@ function renderEvent(app) {
     };
     if (!solosOnly && adm) c.appendChild(b);
     if (!solosOnly && !adm && !has) c.appendChild(el("p", "note", "Le coppie di questo giorno le sorteggia un amministratore."));
-    if (adm && has && eventPlayers(ev).length === 5 && all.length < 5) {
-      var nx = el("button", "btn small", ev.mode5 === "3v2" ? "Cambia squadre" : "Cambia coppie"); nx.style.marginTop = "10px"; nx.style.marginLeft = "8px";
+    if (adm && has && ((eventPlayers(ev).length === 5 && all.length < 5) || (plan && !plan.daily))) {
+      var nx = el("button", "btn small", eventPlayers(ev).length === 5 && ev.mode5 === "3v2" ? "Cambia squadre" : "Cambia coppie"); nx.style.marginTop = "10px"; nx.style.marginLeft = "8px";
       nx.onclick = function () {
         if (!confirm("Passare al turno successivo? Il punteggio inserito finora resta assegnato alle coppie attuali.")) return;
         var trn = turnsOf(ev, d).slice(), gg = makeGroupsFor(ev, d, trn.length);
@@ -1160,8 +1303,11 @@ function syncBuild() {
   });
   events.forEach(function (ev) {
     if (!ev.id) return;
-    m["ev:" + ev.id] = JSON.stringify({ id: ev.id, name: ev.name, start: ev.start, end: ev.end, fish: ev.fish || [], players: ev.players || null, soloOrder: ev.soloOrder || null, mode5: ev.mode5 || null });
-    Object.keys(ev.days || {}).forEach(function (d) { m["day:" + ev.id + ":" + d] = JSON.stringify({ turns: turnsOf(ev, d) }); });
+    var er = { id: ev.id, name: ev.name, start: ev.start, end: ev.end, fish: ev.fish || [], players: ev.players || null, soloOrder: ev.soloOrder || null, mode5: ev.mode5 || null };
+    if (ev.allWith) er.allWith = true;                 // tutti pescano con tutti
+    if (ev.hours) er.hours = ev.hours;                 // orari di pesca per giorno
+    m["ev:" + ev.id] = JSON.stringify(er);
+    Object.keys(ev.days || {}).forEach(function (d) { var dr = { turns: turnsOf(ev, d) }; if (contTurn(ev, d, 0)) dr.cont = 1; m["day:" + ev.id + ":" + d] = JSON.stringify(dr); });
     Object.keys(ev.catches || {}).forEach(function (d) { (ev.catches[d] || []).forEach(function (c) { if (c.id) m["catch:" + ev.id + ":" + d + ":" + c.id] = JSON.stringify(c); }); });
     Object.keys(ev.cookies || {}).forEach(function (d) { (ev.cookies[d] || []).forEach(function (c) { if (c.id) m["ck:" + ev.id + ":" + d + ":" + c.id] = JSON.stringify(c); }); });
   });
@@ -1218,14 +1364,19 @@ function syncPut(r) {
     if (v.players) ev.players = v.players;
     if (v.soloOrder) ev.soloOrder = v.soloOrder;
     if (v.mode5) ev.mode5 = v.mode5;
+    ev.allWith = !!v.allWith;
+    if (v.hours) ev.hours = v.hours;
     return;
   }
   var ev2 = events.filter(function (e) { return e.id === p[1]; })[0];
   if (!ev2) return;
   var d = p[2];
   if (t === "day") {
-    if (r.d) { delete ev2.days[d]; if (ev2.turns) delete ev2.turns[d]; }
-    else { if (!ev2.turns) ev2.turns = {}; ev2.turns[d] = v.turns; ev2.days[d] = v.turns[v.turns.length - 1]; }
+    if (r.d) { delete ev2.days[d]; if (ev2.turns) delete ev2.turns[d]; if (ev2.cont) delete ev2.cont[d]; }
+    else {
+      if (!ev2.turns) ev2.turns = {}; ev2.turns[d] = v.turns; ev2.days[d] = v.turns[v.turns.length - 1];
+      if (!ev2.cont) ev2.cont = {}; if (v.cont) ev2.cont[d] = 1; else delete ev2.cont[d];
+    }
     return;
   }
   var coll = t === "catch" ? "catches" : "cookies";
