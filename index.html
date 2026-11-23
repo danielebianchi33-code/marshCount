@@ -65,6 +65,10 @@ textarea{width:100%;min-height:120px;margin-top:10px;padding:10px;font-family:ui
 .hrow input{width:auto;flex:none;padding:10px 8px}
 .awplan{white-space:pre-line;margin:6px 0 0}
 .cdown{margin:8px 0 0;font-weight:700;color:var(--accent)}
+.walk{margin-top:12px;padding:10px 12px;border:1px dashed var(--border);border-radius:12px;background:var(--bg)}
+.walk .wt{font-weight:700}
+.walk input{width:7.5em;flex:none}
+.walk .hrow span{flex:1}
 .seg .btn{flex:1;padding:10px 8px}
 .btn.on{background:var(--accent);color:var(--accent-t);border-color:var(--accent)}
 .panel input[type=text]{margin-top:8px}
@@ -555,7 +559,7 @@ function render() {
   else if (view.screen === "profile") renderProfile(app);
   else if (view.screen === "event") renderEvent(app);
   else renderHome(app);
-  app.appendChild(el("p", "foot", "\u00a9 Pess, Grapin e Capott - 2026 - v 3.2.0"));
+  app.appendChild(el("p", "foot", "\u00a9 Pess, Grapin e Capott - 2026 - v 3.7.0"));
 }
 function pairsBlock(pairs) {
   var box = el("div", "pairs");
@@ -602,6 +606,7 @@ function renderHome(app) {
     sec.appendChild(c);
   });
   app.appendChild(fold("eventi", sec));
+  app.appendChild(fold("shame", shameBox()));                                      // Wall of shame
 
   // pesci
   var fs = el("div", "sec");
@@ -618,6 +623,7 @@ function renderHome(app) {
     tx.appendChild(el("div", "t", f.name));
     tierLines(f).forEach(function (l) { tx.appendChild(el("div", "m", l)); });
     if (f.special) tx.appendChild(el("div", "m", "\ud83c\udf74 Mangiato / arpionato"));
+    if (fishDry(f)) tx.appendChild(el("div", "m", "\ud83e\udeb6 Anche a secca (+0,5)"));
     c.appendChild(th); c.appendChild(tx);
     if (isAdmin()) c.onclick = function () { openFish(f.id); };
     fs.appendChild(c);
@@ -680,6 +686,7 @@ function renderNew(app) {
     if (awOn && rg.some(function (d) { return !hoursOk(awDraft.hours[d]); })) { err.textContent = "Controlla gli orari: in ogni giorno l\u2019ora di fine deve venire dopo quella di inizio."; return; }
     var ev = { id: Date.now().toString(36), name: name, start: s.value, end: e.value, days: {}, fish: ids.slice(), players: pls.slice(), mode5: pls.length === 5 ? m5 : "2v2v1" };
     if (awOn) { ev.allWith = true; ev.hours = {}; rg.forEach(function (d) { ev.hours[d] = { from: awDraft.hours[d].from, to: awDraft.hours[d].to }; }); }
+    if (abc.checked) ev.borghese = true;                                         // Alessandro Borghese Edition
     events.push(ev); saveEvents(); go("event", ev.id);
   };
   var ids = [];
@@ -695,9 +702,14 @@ function renderNew(app) {
   var awBox = awEditor(awDraft, function () { return s.value && e.value && e.value >= s.value ? range(s.value, e.value) : []; },
     function () { return pls.length; }, function () {});
   var pp = playerPicker(pls, function () { updM5(); awBox.redraw(); }); updM5();
+  var abl = el("label", "pick"); abl.style.marginTop = "14px";                  // Alessandro Borghese Edition: per ora solo la casella
+  var abc = el("input"); abc.type = "checkbox"; abc.id = "abchk";
+  var abw = el("div"); abw.appendChild(el("span", "", "Alessandro Borghese Edition"));
+  var abn = el("div", "note", "Una sorpresa che si scopre solo a fine giornata, in classifica. Fino ad allora: acqua in bocca."); abn.style.margin = "2px 0 0";
+  abw.appendChild(abn); abl.appendChild(abc); abl.appendChild(abw);
   var l4 = el("label", "f", "Pesci pescabili (opzionale)");
   var pk = fishPicker(ids, function () {}, false);
-  [l1, n, l2, s, l3, e, l0, nt0, pp, mbox, awBox, l4, pk, b, err].forEach(function (x) { app.appendChild(x); });
+  [l1, n, l2, s, l3, e, l0, nt0, pp, mbox, awBox, abl, l4, pk, b, err].forEach(function (x) { app.appendChild(x); });
 }
 
 // Casella «Tutti pescano con tutti» + orari di pesca giorno per giorno. o = { allWith, hours } (bozza o evento).
@@ -843,6 +855,7 @@ function renderEvent(app) {
       c.appendChild(el("p", "note awplan", txt));
       if (!plan.daily && d === today() && ev.days[d]) c.appendChild(awCountdown(ev, d, segs));
     }
+    if (ev.borghese && d <= today() && ev.days[d]) c.appendChild(walkBox(ev, d));   // Alessandro Borghese Edition
     var has = ev.days[d];
     if (has) c.appendChild(dayPairs(ev, d, has));
     var b = el("button", "btn small", has ? "Rigenera" : "Genera coppie"); b.style.marginTop = "10px";
@@ -1038,10 +1051,10 @@ function openFish(id) {
   var f = fish.filter(function (x) { return x.id === id; })[0];
   var c = function (v) { return String(v).replace(".", ","); };
   if (f) {
-    draft = { id: f.id, name: f.name, photo: f.photo, special: !!f.special, unit: f.unit || "cm",
+    draft = { id: f.id, name: f.name, photo: f.photo, special: !!f.special, dry: fishDry(f), unit: f.unit || "cm",
       rows: f.tiers.filter(function (t) { return t.max !== null; }).map(function (t) { return { max: c(t.max), pts: c(t.points) }; }),
       last: c(f.tiers[f.tiers.length - 1].points) };
-  } else draft = { id: null, name: "", photo: null, special: false, unit: "cm", rows: [{ max: "", pts: "" }], last: "" };
+  } else draft = { id: null, name: "", photo: null, special: false, dry: false, unit: "cm", rows: [{ max: "", pts: "" }], last: "" };
   go("fish", id || "new");
 }
 function renderFish(app) {
@@ -1074,6 +1087,12 @@ function renderFish(app) {
   var sps = el("div", "note", "Invece di \u201ca mosca / retrograda\u201d si sceglie \u201cmangiato\u201d (punteggio pieno) o \u201carpionato\u201d (\u22120,5)."); sps.style.margin = "2px 0 0";
   var spw = el("div"); spw.appendChild(spt); spw.appendChild(sps);
   spl.appendChild(spc); spl.appendChild(spw); app.appendChild(spl);
+  var dyl = el("label", "pick"); dyl.style.marginTop = "8px";
+  var dyc = el("input"); dyc.type = "checkbox"; dyc.checked = !!draft.dry; dyc.id = "fdry";
+  dyc.onchange = function () { draft.dry = dyc.checked; };
+  var dyw = el("div"); dyw.appendChild(el("span", "", "Si pu\u00f2 prendere a secca (+0,5)"));
+  var dys = el("div", "note", "Aggiunge la tecnica \u201ca secca\u201d, che vale 0,5 punti in pi\u00f9 di \u201ca mosca\u201d. Non vale per i pesci mangiato/arpionato."); dys.style.margin = "2px 0 0";
+  dyw.appendChild(dys); dyl.appendChild(dyc); dyl.appendChild(dyw); app.appendChild(dyl);
 
   var ulb = el("label", "f", "Le taglie si misurano in"); app.appendChild(ulb);
   app.appendChild(seg(["Centimetri (cm)", "Chilogrammi (kg)"], draft.unit === "kg" ? 1 : 0, function (i) { draft.unit = i === 1 ? "kg" : "cm"; drawTiers(); }));
@@ -1135,7 +1154,7 @@ function renderFish(app) {
     var lp = num(draft.last);
     if (lp === null || lp < 0) { err.textContent = tiers.length ? "Indica i punti per le misure oltre l\u2019ultima soglia." : "Indica i punti del pesce."; return; }
     tiers.push({ max: null, points: lp });
-    var rec = { id: draft.id || Date.now().toString(36), name: name, photo: draft.photo, special: !!draft.special, unit: draft.unit || "cm", tiers: tiers };
+    var rec = { id: draft.id || Date.now().toString(36), name: name, photo: draft.photo, special: !!draft.special, dry: !!draft.dry, unit: draft.unit || "cm", tiers: tiers };
     var k = fish.findIndex(function (x) { return x.id === rec.id; });
     var oldF = k >= 0 ? fish[k] : null;
     rec.pid = oldF ? (oldF.pid || "") : ""; rec.photoPid = oldF ? (oldF.photoPid || "") : "";
@@ -1298,6 +1317,7 @@ function syncBuild() {
   ideas.forEach(function (x) { if (x && x.id) m["idea:" + x.id] = JSON.stringify(x); });
   fish.forEach(function (f) {
     var fr = { id: f.id, name: f.name, special: !!f.special, unit: f.unit || "cm", tiers: f.tiers };
+    if (f.dry !== undefined) fr.dry = !!f.dry;       // casella «a secca» (solo se toccata)
     if (f.pid) fr.pid = f.pid;                       // foto del pesce su Drive
     m["fish:" + f.id] = JSON.stringify(fr);
   });
@@ -1306,10 +1326,13 @@ function syncBuild() {
     var er = { id: ev.id, name: ev.name, start: ev.start, end: ev.end, fish: ev.fish || [], players: ev.players || null, soloOrder: ev.soloOrder || null, mode5: ev.mode5 || null };
     if (ev.allWith) er.allWith = true;                 // tutti pescano con tutti
     if (ev.hours) er.hours = ev.hours;                 // orari di pesca per giorno
+    if (ev.borghese) er.borghese = true;               // Alessandro Borghese Edition
+    if (ev.reveal && Object.keys(ev.reveal).length) er.reveal = ev.reveal;   // giorni svelati a mano
     m["ev:" + ev.id] = JSON.stringify(er);
     Object.keys(ev.days || {}).forEach(function (d) { var dr = { turns: turnsOf(ev, d) }; if (contTurn(ev, d, 0)) dr.cont = 1; m["day:" + ev.id + ":" + d] = JSON.stringify(dr); });
     Object.keys(ev.catches || {}).forEach(function (d) { (ev.catches[d] || []).forEach(function (c) { if (c.id) m["catch:" + ev.id + ":" + d + ":" + c.id] = JSON.stringify(c); }); });
     Object.keys(ev.cookies || {}).forEach(function (d) { (ev.cookies[d] || []).forEach(function (c) { if (c.id) m["ck:" + ev.id + ":" + d + ":" + c.id] = JSON.stringify(c); }); });
+    Object.keys(ev.steps || {}).forEach(function (d) { Object.keys(ev.steps[d] || {}).forEach(function (n) { m["step:" + ev.id + ":" + d + ":" + n] = JSON.stringify({ n: ev.steps[d][n] }); }); });
   });
   return m;
 }
@@ -1351,8 +1374,8 @@ function syncPut(r) {
   if (t === "fish") {
     var i = fish.findIndex(function (f) { return f.id === p[1]; });
     if (r.d) { if (i >= 0) fish.splice(i, 1); return; }
-    if (i >= 0) { fish[i].name = v.name; fish[i].special = v.special; fish[i].tiers = v.tiers; if (v.unit) fish[i].unit = v.unit; fish[i].pid = v.pid || ""; }
-    else fish.push({ id: v.id, name: v.name, photo: null, pid: v.pid || "", photoPid: "", special: v.special, unit: v.unit || "cm", tiers: v.tiers });
+    if (i >= 0) { fish[i].name = v.name; fish[i].special = v.special; fish[i].tiers = v.tiers; if (v.unit) fish[i].unit = v.unit; fish[i].pid = v.pid || ""; if ("dry" in v) fish[i].dry = !!v.dry; else delete fish[i].dry; }
+    else { fish.push({ id: v.id, name: v.name, photo: null, pid: v.pid || "", photoPid: "", special: v.special, unit: v.unit || "cm", tiers: v.tiers }); if ("dry" in v) fish[fish.length - 1].dry = !!v.dry; }
     return;
   }
   if (t === "ev") {
@@ -1366,6 +1389,8 @@ function syncPut(r) {
     if (v.mode5) ev.mode5 = v.mode5;
     ev.allWith = !!v.allWith;
     if (v.hours) ev.hours = v.hours;
+    ev.borghese = !!v.borghese;
+    ev.reveal = v.reveal || {};
     return;
   }
   var ev2 = events.filter(function (e) { return e.id === p[1]; })[0];
@@ -1379,6 +1404,12 @@ function syncPut(r) {
     }
     return;
   }
+  if (t === "step") {                                  // passi della Borghese Edition: step:evento:giorno:nome
+    if (!ev2.steps) ev2.steps = {};
+    var sd = ev2.steps[d] || (ev2.steps[d] = {}), nm = p.slice(3).join(":");
+    if (r.d) delete sd[nm]; else sd[nm] = v.n;
+    return;
+  }
   var coll = t === "catch" ? "catches" : "cookies";
   if (!ev2[coll]) ev2[coll] = {};
   var arr = ev2[coll][d] || [], idx = arr.findIndex(function (c) { return c.id === p[3]; });
@@ -1388,7 +1419,7 @@ function syncPut(r) {
 }
 function syncApply(meta, recs, detect) {
   if (detect) syncDetect(meta);                       // le modifiche locali non ancora inviate vincono sulle più vecchie
-  var pr = { part: 0, fish: 1, ev: 2, day: 3, catch: 4, ck: 5, idea: 6, face: 7 };
+  var pr = { part: 0, fish: 1, ev: 2, day: 3, catch: 4, ck: 5, idea: 6, face: 7, step: 8 };
   recs = recs.filter(function (r) {
     var m = meta.recs[r.k];
     return pr[r.k.split(":")[0]] !== undefined && !(m && !m.force && m.u >= r.u);
@@ -1452,7 +1483,7 @@ function syncNow() {
     applied += syncApply(meta, resp.records || [], meta.joined); if (!SYNC.again) meta.since = resp.now; lsSet(K_SMETA, meta);
   }
   function pending() {
-    var cur = syncDetect(meta), out = [], pri = { part: 0, fish: 1, ev: 2, day: 3, catch: 4, ck: 5, idea: 6, face: 7 };
+    var cur = syncDetect(meta), out = [], pri = { part: 0, fish: 1, ev: 2, day: 3, catch: 4, ck: 5, idea: 6, face: 7, step: 8 };
     Object.keys(meta.recs).forEach(function (k) {
       var r = meta.recs[k];
       if (!r.sent) out.push(r.d ? { k: k, u: r.u, d: 1 } : { k: k, u: r.u, d: 0, v: cur[k] });
@@ -1720,7 +1751,7 @@ function syncBox() {
   var cfg = syncCfg() || {};
   var d = el("details"); d.open = SYNC.keepOpen;
   d.appendChild(el("summary", "", "Sincronizzazione (Google Fogli)" + (cfg.url ? " \u2601\ufe0f" : "")));
-  d.appendChild(el("p", "note", "Collega l\u2019app al foglio Google per condividere i dati con gli altri telefoni. L\u2019indirizzo resta solo su questo telefono; l\u2019accesso lo gestisce il login. Le foto caricate a mano non vengono condivise."));
+  d.appendChild(el("p", "note", "Collega l\u2019app al foglio Google per condividere i dati con gli altri telefoni. " + (isAdmin() ? "L\u2019indirizzo resta solo su questo telefono; l\u2019accesso" : "L\u2019accesso") + " lo gestisce il login. Le foto caricate a mano non vengono condivise."));
   var l1 = el("label", "f", "Indirizzo dello script (finisce con /exec)"); l1.htmlFor = "syurl";
   var u = el("input"); u.type = "text"; u.id = "syurl"; u.value = cfg.url || ""; u.placeholder = "https://script.google.com/macros/s/\u2026/exec"; u.autocomplete = "off"; u.setAttribute("autocapitalize", "off");
   var st = el("div", "ok"); st.setAttribute("role", "status"); SYNC.statusEl = st; st.textContent = syncStatusText();
@@ -1744,8 +1775,9 @@ function syncBox() {
   var bf = el("button", "btn small", "Invia foto in attesa"), bv = el("button", "btn small", "Verifica script");
   bf.onclick = function () { SYNC.keepOpen = true; pst.textContent = "Invio in corso\u2026"; photoUploadPending().then(photoStatusRefresh); };
   bv.onclick = function () { SYNC.keepOpen = true; photoCheckScript(pst); };
-  bar.appendChild(bs); bar.appendChild(bn); bar.appendChild(bf); bar.appendChild(bv); bar.appendChild(bx);
-  [l1, u, bar, st, pst].forEach(function (x) { d.appendChild(x); });
+  if (isAdmin()) bar.appendChild(bs);                       // l'indirizzo dello script lo vedono e lo cambiano solo gli amministratori
+  bar.appendChild(bn); bar.appendChild(bf); bar.appendChild(bv); bar.appendChild(bx);
+  (isAdmin() ? [l1, u, bar, st, pst] : [bar, st, pst]).forEach(function (x) { d.appendChild(x); });
   return d;
 }
 
@@ -2445,6 +2477,14 @@ function authLogin(url, email, pw) {
 }
 // Link d'invito: .../?s=INDIRIZZO-DELLO-SCRIPT. Aprendolo l'indirizzo viene memorizzato e tolto dalla barra del browser.
 var SCRIPT_RE = /^https:\/\/script\.google\.com\/macros\/s\/[\w\-]+\/exec$/;
+// Indirizzo dello script del gruppo, gi\u00e0 dentro l'app: l'invito \u00e8 il semplice link dell'app e l'utente non lo vede.
+// Il link con ?s= resta valido (ha la precedenza), ad esempio per passare a un altro script.
+var SCRIPT_URL_DEF = "https://script.google.com/macros/s/AKfycbzsSm_MoVtO3g4ccRBo0WsKqh5JBUtrEPjGc9Hc_dSHnIXMPqeXKjT42rI9pTNHESpb/exec";
+function scriptDefault() {
+  if ((lsGet(K_SCFG) || {}).url) return;                        // gi\u00e0 collegato (o arrivato da un link con ?s=)
+  lsSet(K_SMETA, { recs: {}, since: 0, joined: false, lastOk: 0 });
+  lsSet(K_SCFG, { url: SCRIPT_URL_DEF, pw: "" });
+}
 function inviteApply() {
   var u = "";
   try { u = new URLSearchParams(location.search).get("s") || ""; } catch (e) { return; }
@@ -2507,8 +2547,8 @@ function accountBox() {
   var msg = el("div", "note"); msg.setAttribute("role", "status");
   inv.onclick = function () {
     if (!cfg || !cfg.url) { msg.textContent = "Serve il collegamento al foglio."; return; }
-    var link = location.origin + location.pathname + "?s=" + encodeURIComponent(cfg.url);
-    function done(ok) { msg.textContent = ok ? "Link copiato: chi lo apre non deve inserire l\u2019indirizzo dello script." : "Copia non riuscita su questo telefono."; }
+    var link = location.origin + location.pathname + (cfg.url === SCRIPT_URL_DEF ? "" : "?s=" + encodeURIComponent(cfg.url));
+    function done(ok) { msg.textContent = ok ? "Link copiato: chi lo apre deve solo fare il login." : "Copia non riuscita su questo telefono."; }
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(function () { done(true); }, function () { done(false); });
     else { try { var t = document.createElement("textarea"); t.value = link; document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); done(true); } catch (e) { done(false); } }
   };
@@ -2702,10 +2742,81 @@ function photoPullAll() {
 }
 
 // ---------- CLASSIFICA ----------
+// ---------- ALESSANDRO BORGHESE EDITION: punti a chi cammina di più ----------
+// Ognuno inserisce i passi della giornata; il risultato resta nascosto finché li hanno inseriti tutti,
+// o fino alle 21:00 di quel giorno, o finché un amministratore lo svela. Podio 3 / 2 / 1, solo classifica individuale.
+var WALK_PTS = [3, 2, 1], WALK_HOUR = 21, WALK_MAX = 200000;
+function stepsOf(ev, d) { return (ev.steps && ev.steps[d]) || {}; }
+function walkRevealed(ev, d) {
+  if (!ev.borghese) return false;
+  if (ev.reveal && ev.reveal[d]) return true;
+  var pl = eventPlayers(ev), st = stepsOf(ev, d);
+  if (pl.length && pl.every(function (n) { return typeof st[n] === "number"; })) return true;
+  var t = today();
+  return t > d || (t === d && new Date().getHours() >= WALK_HOUR);
+}
+function walkRank(ev, d) {
+  var st = stepsOf(ev, d);
+  var rows = eventPlayers(ev).filter(function (n) { return st[n] > 0; }).map(function (n) { return { name: n, n: st[n] }; })
+    .sort(function (a, b) { return b.n - a.n || a.name.localeCompare(b.name, "it"); });
+  rows.forEach(function (r, i) { r.pos = i && rows[i - 1].n === r.n ? rows[i - 1].pos : i + 1; r.pts = WALK_PTS[r.pos - 1] || 0; });   // a pari passi, stessi punti
+  return rows;
+}
+function walkPts(ev, d, name) {
+  if (!walkRevealed(ev, d)) return 0;
+  var r = walkRank(ev, d).filter(function (x) { return x.name === name; })[0];
+  return r ? r.pts : 0;
+}
+function stepsTxt(n) { return Number(n).toLocaleString("it-CH"); }
+// riquadro nel giorno dell'evento: i propri passi (gli amministratori quelli di tutti)
+function walkBox(ev, d) {
+  var me = authGet() ? authGet().who : null, pl = eventPlayers(ev), adm = isAdmin(), st = stepsOf(ev, d), rev = walkRevealed(ev, d);
+  var box = el("div", "walk");
+  if (!adm && pl.indexOf(me) < 0) { box.style.display = "none"; return box; }
+  box.appendChild(el("div", "wt", "\ud83d\udc63 Alessandro Borghese Edition"));
+  if (rev) {
+    box.appendChild(el("p", "note", "Il verdetto dei passi \u00e8 uscito: conferma o ribalta? Guarda la classifica!"));
+    if (!adm) return box;
+  } else box.appendChild(el("p", "note", "Quanti passi hai fatto oggi? Leggili sul telefono (Salute o Google Fit) e scrivili qui. Il resto \u00e8 segreto fino a fine giornata."));
+  var err = el("div", "err"); err.setAttribute("role", "alert");
+  (adm ? pl : [me]).forEach(function (n) {
+    var r = el("div", "hrow");
+    r.appendChild(el("span", "", adm ? n : "I miei passi"));
+    var inp = el("input"); inp.type = "number"; inp.inputMode = "numeric"; inp.min = "0"; inp.max = String(WALK_MAX); inp.step = "1";
+    inp.value = typeof st[n] === "number" ? String(st[n]) : ""; inp.placeholder = "es. 14500"; inp.setAttribute("aria-label", "Passi di " + n);
+    var b = el("button", "btn small", "Salva"); b.type = "button";
+    b.onclick = function () {
+      var raw = String(inp.value).trim(), v = Number(raw);
+      if (!ev.steps) ev.steps = {};
+      if (!ev.steps[d]) ev.steps[d] = {};
+      if (raw === "") delete ev.steps[d][n];                                  // campo vuoto: passi tolti
+      else if (!/^\d+$/.test(raw) || v > WALK_MAX) { err.textContent = "Mettici un numero intero di passi, da 0 a " + stepsTxt(WALK_MAX) + "."; return; }
+      else ev.steps[d][n] = v;
+      saveEvents(); var y = window.scrollY; render(); window.scrollTo(0, y);
+    };
+    r.appendChild(inp); r.appendChild(b); box.appendChild(r);
+  });
+  box.appendChild(err);
+  if (!rev) {
+    var k = pl.filter(function (n) { return typeof st[n] === "number"; }).length;
+    box.appendChild(el("p", "note", "Passi inseriti: " + k + " di " + pl.length + ". Il risultato si svela quando li hanno inseriti tutti, o alle " + WALK_HOUR + ":00." +
+      (adm ? " Da amministratore vedi i passi di tutti: niente spoiler." : (typeof st[me] === "number" ? " I tuoi: " + stepsTxt(st[me]) + ". Acqua in bocca." : ""))));
+    if (adm) {
+      var sv = el("button", "btn small", "Svela ora"); sv.type = "button"; sv.style.marginTop = "8px";
+      sv.onclick = function () {
+        if (!confirm("Svelare adesso il risultato dei passi di questo giorno? Comparir\u00e0 subito in classifica.")) return;
+        if (!ev.reveal) ev.reveal = {}; ev.reveal[d] = 1; saveEvents(); var y = window.scrollY; render(); window.scrollTo(0, y);
+      };
+      box.appendChild(sv);
+    }
+  }
+  return box;
+}
+
 function standings(ev) {
   var t = today(), map = {}, order = [], days = 0, noPair = eventPlayers(ev).length <= 3;
   function row(n) {
-    if (!map[n]) { map[n] = { name: n, single: 0, pair: 0, total: 0, n: 0 }; order.push(map[n]); }
+    if (!map[n]) { map[n] = { name: n, single: 0, pair: 0, walk: 0, total: 0, n: 0 }; order.push(map[n]); }
     return map[n];
   }
   eventPlayers(ev).forEach(function (n) { row(n); });
@@ -2722,8 +2833,9 @@ function standings(ev) {
         });
       });
     });
+    if (ev.borghese) eventPlayers(ev).forEach(function (n) { var w = walkPts(ev, d, n); if (w) { var r = row(n); r.walk = r2(r.walk + w); } });   // solo individuale
   });
-  order.forEach(function (r) { r.total = r2(r.single + r.pair); });
+  order.forEach(function (r) { r.total = r2(r.single + r.pair + r.walk); });
   order.sort(function (a, b) { return b.total - a.total || b.single - a.single || a.name.localeCompare(b.name, "it"); });
   order.forEach(function (r, i) {
     var p = order[i - 1];
@@ -2732,6 +2844,55 @@ function standings(ev) {
   var lastPos = order.length ? order[order.length - 1].pos : 0;
   order.forEach(function (r) { r.last = lastPos > 1 && r.pos === lastPos; });
   return { rows: order, days: days, noPair: noPair };
+}
+// ---------- WALL OF SHAME: albo d'oro di tutti gli eventi conclusi ----------
+// Per ogni evento finito: 1° = 3 punti, 2° = 2, 3° = 1 (a pari merito nell'evento, stessi punti; chi ha 0 punti non prende nulla).
+// Pari punti nel muro: più vittorie, poi più secondi posti; se è tutto uguale si condivide il posto. Si mostrano i primi tre.
+var SHAME_PTS = [3, 2, 1];
+var SHAME_TAG = ["Re del fiume. Della modestia, invece, nemmeno l\u2019ombra.", "Eterno secondo: quasi, ma il pesce non lo sa.", "Ultimo gradino del podio: \u201cl\u2019importante \u00e8 partecipare\u201d, dice lui."];
+function shameTable() {
+  var t = today(), map = {}, n = 0;
+  events.forEach(function (ev) {
+    if (!ev.id || !ev.end || ev.end >= t) return;                    // solo eventi conclusi
+    var any = false;
+    standings(ev).rows.forEach(function (r) {
+      if (r.total <= 0 || r.pos > 3) return;
+      var m = map[r.name] || (map[r.name] = { name: r.name, pts: 0, w: [0, 0, 0] });
+      m.pts += SHAME_PTS[r.pos - 1]; m.w[r.pos - 1]++; any = true;
+    });
+    if (any) n++;
+  });
+  var rows = Object.keys(map).map(function (k) { return map[k]; }).sort(function (a, b) {
+    return b.pts - a.pts || b.w[0] - a.w[0] || b.w[1] - a.w[1] || a.name.localeCompare(b.name, "it");
+  });
+  rows.forEach(function (r, i) { var p = rows[i - 1]; r.pos = p && p.pts === r.pts && p.w[0] === r.w[0] && p.w[1] === r.w[1] ? p.pos : i + 1; });
+  return { rows: rows.filter(function (r) { return r.pos <= 3; }), events: n };
+}
+function shameBox() {
+  var sec = el("div", "sec");
+  sec.appendChild(el("h2", "", "Wall of shame"));
+  var sh = shameTable();
+  sec.appendChild(el("p", "note", "L\u2019albo d\u2019oro di tutti i tempi: chi vince un evento prende 3 punti, il secondo 2, il terzo 1. Gli altri sono qui per guardare e vergognarsi un pochino."));
+  if (!sh.rows.length) {
+    sec.appendChild(el("p", "note", "Il muro \u00e8 ancora intonso: nessun evento concluso con un podio. La vergogna \u00e8 solo rimandata."));
+    return sec;
+  }
+  sh.rows.forEach(function (r) {
+    var c = el("div", "card rrow tap" + (r.pos === 1 ? " gold" : ""));
+    c.onclick = function () { var k = state.names.indexOf(r.name); if (k >= 0) { profEdit = false; go("profile", String(k)); } };
+    c.appendChild(el("div", "rpos", String(r.pos)));
+    var av = avatar(r.name); av.style.width = "44px"; av.style.height = "44px"; c.appendChild(av);
+    var tx = el("div"); tx.style.minWidth = "0";
+    tx.appendChild(el("div", "rname", medal({ total: r.pts, pos: r.pos }) + r.name));
+    tx.appendChild(el("div", "rsub", SHAME_TAG[r.pos - 1]));
+    tx.appendChild(el("div", "rsub", "\ud83e\udd47 " + r.w[0] + " \u00b7 \ud83e\udd48 " + r.w[1] + " \u00b7 \ud83e\udd49 " + r.w[2]));
+    c.appendChild(tx);
+    var tot = el("div", "rtot", String(r.pts)); tot.appendChild(el("small", "", " pt"));
+    c.appendChild(tot);
+    sec.appendChild(c);
+  });
+  sec.appendChild(el("p", "note", "Tutti gli altri: non pervenuti. Ritenta, sarai pi\u00f9 fortunato. Calcolato su " + sh.events + (sh.events === 1 ? " evento concluso." : " eventi conclusi.")));
+  return sec;
 }
 function medal(r) {
   if (r.total <= 0) return "";
@@ -2755,12 +2916,28 @@ function renderRank(app) {
     var rn = el("div", "rname", medal(r) + r.name);
     if (r.last) rn.appendChild(el("span", "wob", " \ud83d\udca9"));
     tx.appendChild(rn);
-    tx.appendChild(el("div", "rsub", "Singolo " + nf(r.single) + (st.noPair ? "" : " \u00b7 Squadra " + nf(r.pair)) + " \u00b7 " + r.n + (r.n === 1 ? " cattura" : " catture")));
+    tx.appendChild(el("div", "rsub", "Singolo " + nf(r.single) + (st.noPair ? "" : " \u00b7 Squadra " + nf(r.pair)) + (r.walk ? " \u00b7 \ud83d\udc63 Passi " + nf(r.walk) : "") + " \u00b7 " + r.n + (r.n === 1 ? " cattura" : " catture")));
     c.appendChild(tx);
     var tot = el("div", "rtot", nf(r.total)); tot.appendChild(el("small", "", " pt"));
     c.appendChild(tot);
     app.appendChild(c);
   });
+  if (ev.borghese) {                                                    // Alessandro Borghese Edition: si vede solo qui, e solo dopo lo svelamento
+    range(ev.start, ev.end).forEach(function (d) {
+      if (d > today() || !ev.days[d] || !walkRevealed(ev, d)) return;
+      var wr = walkRank(ev, d);
+      var wc = el("div", "card");
+      wc.appendChild(el("div", "t", "\ud83d\udc63 Alessandro Borghese Edition \u00b7 " + longDate(d)));
+      if (!wr.length) wc.appendChild(el("div", "m", "Nessuno ha inserito i passi: oggi si \u00e8 pescato da seduti."));
+      wr.forEach(function (x) {
+        var ln = el("div", "rk");
+        ln.appendChild(el("span", "", (x.pos === 1 ? "\ud83e\udd47 " : x.pos === 2 ? "\ud83e\udd48 " : x.pos === 3 ? "\ud83e\udd49 " : "") + x.name + " \u00b7 " + stepsTxt(x.n) + " passi"));
+        ln.appendChild(el("b", "", x.pts ? "+" + nf(x.pts) + " pt" : "\u2013"));
+        wc.appendChild(ln);
+      });
+      app.appendChild(wc);
+    });
+  }
   app.appendChild(el("p", "note", st.noPair ? "Con 2 o 3 partecipanti non ci sono coppie: conta solo il punteggio singolo, sommato giorno per giorno fino a oggi compreso." : "Totale = punti singoli + punti della squadra (coppia o trio; comprendono anche i propri), sommati giorno per giorno fino a oggi compreso. Per chi pesca da solo il totale di squadra coincide con i propri punti. Nei turni 3 contro 2 i pesci valgono ×1,5 per la coppia e ×1 per il trio nel punteggio di squadra. A parità di totale passa avanti chi ha più punti singoli."));
 }
 
@@ -2773,8 +2950,11 @@ function tierLabel(f, i) {
 }
 var PEN = 5;
 var PENM = 0.5;   // penalità tecnica: retrograda / arpionato
+var BONUS_SECCA = 0.5;   // bonus tecnica: cattura a secca (pesci con la casella «a secca», es. i temoli)
+// «a secca» attiva: casella della scheda pesce; se non è mai stata toccata vale per i pesci con «temolo» nel nome
+function fishDry(f) { return !!f && !f.special && (f.dry === undefined ? /temol/.test(fishKey(f.name)) : !!f.dry); }
 var DEPTH_LBL = { sottoriva: "sottoriva", profondo: "batimetrie importanti" };
-var METHOD_LBL = { mosca: "a mosca", retrograda: "retrograda", mangiato: "mangiato", arpionato: "arpionato" };
+var METHOD_LBL = { mosca: "a mosca", secca: "a secca", retrograda: "retrograda", mangiato: "mangiato", arpionato: "arpionato" };
 function cks(ev, d) { return (ev.cookies && ev.cookies[d]) || []; }
 function cookiePts(c) { return c.kind === "penance" ? (c.done ? 0 : -PEN) : c.points; }
 function samePair(c, grp) {
@@ -2978,6 +3158,7 @@ function dayPairs(ev, d, pairs) {
         if (!f.special) panel.appendChild(photoBarEl(function () { return pendingPhoto; }, function (v) { pendingPhoto = v; }));
         var opts = f.special ? [["Mangiato", "mangiato", 0], ["Arpionato", "arpionato", -PENM]]
                              : [["A mosca", "mosca", 0], ["Pesca retrograda", "retrograda", -PENM]];
+        if (fishDry(f)) opts.push(["A secca", "secca", BONUS_SECCA]);   // es. i temoli: +0,5 rispetto a mosca
         opts.sort(function (a, b) { return a[2] - b[2]; });
         opts.forEach(function (o) {
           var pts = r2(Math.max(0, t.points + o[2]));
@@ -3199,6 +3380,7 @@ seedFish();
 fixFishFlags();
 fixFishTiers();
 inviteApply();
+scriptDefault();
 try { RK.snap = rankSnapshot(); } catch (e) {}
 startSync();
 setTimeout(pushRefresh, 3000);
